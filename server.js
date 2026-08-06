@@ -6,6 +6,7 @@ import { createPool } from "./src/db.js";
 import { migrate } from "./src/migrate.js";
 import { authRoutes } from "./src/routes/auth.js";
 import { tokenRoutes } from "./src/routes/tokens.js";
+import { deviceRoutes } from "./src/routes/devices.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -75,6 +76,7 @@ app.get("/api/config", (req, res) => {
 app.use(express.json({ limit: "16kb" }));
 app.use(authRoutes(pool));
 app.use(tokenRoutes(pool));
+app.use(deviceRoutes(pool));
 
 app.use((err, req, res, next) => {
   console.error(JSON.stringify({ msg: "unhandled", path: req.path, err: String(err) }));
