@@ -2,6 +2,8 @@ import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import { createPool } from "./src/db.js";
+import { migrate } from "./src/migrate.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -32,6 +34,8 @@ requireEnv("EXPECTED_HOSTS");
 // Flipped once migrations have run. /api/* refuses to serve until then, so a
 // slow migration degrades to a clear 503 instead of a failed health check.
 let ready = false;
+
+const pool = createPool("web");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -84,7 +88,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
 });
 
 async function boot() {
-  // Migrations, sender fork and maintenance loops land here.
+  await migrate(pool);
   probeEgress();
 }
 
