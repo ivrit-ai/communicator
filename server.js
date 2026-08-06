@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { createPool } from "./src/db.js";
 import { migrate } from "./src/migrate.js";
+import { authRoutes } from "./src/routes/auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -27,7 +28,6 @@ const PORT = Number(requireEnv("XHOST_HTTP_PORT"));
 const VAPID_PUBLIC_KEY = requireEnv("VAPID_PUBLIC_KEY");
 requireEnv("VAPID_PRIVATE_KEY");
 requireEnv("VAPID_SUBJECT");
-requireEnv("SESSION_SECRET");
 requireEnv("ACK_SECRET");
 requireEnv("EXPECTED_HOSTS");
 
@@ -56,7 +56,9 @@ app.use(
   })
 );
 
-app.use("/api", (req, res, next) => {
+// Everything that can touch Postgres sits behind this. GET / deliberately does
+// not, so a database blip never fails the health probe.
+app.use(["/api", "/auth"], (req, res, next) => {
   if (!ready) return res.status(503).json({ status: "starting" });
   next();
 });
@@ -67,6 +69,14 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/config", (req, res) => {
   res.json({ vapidPublicKey: VAPID_PUBLIC_KEY });
+});
+
+app.use(express.json({ limit: "16kb" }));
+app.use(authRoutes(pool));
+
+app.use((err, req, res, next) => {
+  console.error(JSON.stringify({ msg: "unhandled", path: req.path, err: String(err) }));
+  res.status(500).json({ error: "internal" });
 });
 
 // Bind BEFORE touching Postgres. The platform probes GET / within 120s of
