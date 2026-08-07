@@ -1,4 +1,4 @@
-const SHELL = "shell-v1";
+const SHELL = "shell-v2";
 const SHELL_FILES = ["/", "/app.js", "/styles.css", "/manifest.webmanifest", "/icons/icon-192.png"];
 
 // Take over immediately rather than waiting for every tab to close. A stale

@@ -429,11 +429,41 @@ document.addEventListener("visibilitychange", () => {
   loadFeed().catch(() => {});
 });
 
+function installed() {
+  return navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+}
+
 function showIosHint() {
   const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
-  const standalone = navigator.standalone || matchMedia("(display-mode: standalone)").matches;
-  $("ios-hint").hidden = !isIos || standalone;
+  $("ios-hint").hidden = !isIos || installed();
 }
+
+// Chrome and friends fire this instead of offering an install affordance of
+// their own, and the event is only honoured if replayed from a real gesture —
+// so it has to be captured here and spent inside the click handler.
+let installPrompt = null;
+
+addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  $("install-hint").hidden = installed();
+});
+
+addEventListener("appinstalled", () => {
+  installPrompt = null;
+  $("install-hint").hidden = true;
+});
+
+$("install").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  const { outcome } = await installPrompt.userChoice;
+  // Single use: a spent event cannot be replayed. The browser fires a fresh
+  // one if and when it decides the site is eligible again.
+  installPrompt = null;
+  $("install-hint").hidden = true;
+  if (outcome === "dismissed") toast("You can install later from the browser menu.");
+});
 
 async function start() {
   showIosHint();

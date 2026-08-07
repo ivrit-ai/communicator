@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0f1115" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)" />
     <title>Notifier</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png" />
@@ -15,6 +16,19 @@
       <span class="brand"><img src="/icons/icon-192.png" alt="" width="24" height="24" />Notifier</span>
       <span id="who" class="who"></span>
     </header>
+
+    <!-- Shown only once the browser has fired beforeinstallprompt, i.e. only
+         when installing would actually succeed. iOS never fires it and gets
+         the hint below instead. -->
+    <aside id="install-hint" class="note" hidden>
+      <div class="row spread">
+        <span>
+          <strong>Install Notifier.</strong> It opens like an app, and notifications keep arriving
+          when the browser is closed.
+        </span>
+        <button id="install" class="primary">Install</button>
+      </div>
+    </aside>
 
     <!-- The Home Screen cookie jar is separate from Safari's, so signing in
          first yields a signed-out PWA and an inexplicable second login. -->
