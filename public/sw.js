@@ -1,7 +1,49 @@
+const SHELL = "shell-v1";
+const SHELL_FILES = ["/", "/app.js", "/styles.css", "/manifest.webmanifest", "/icons/icon-192.png"];
+
 // Take over immediately rather than waiting for every tab to close. A stale
 // service worker keeps handling pushes with old logic long after a deploy.
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(SHELL).then((cache) => cache.addAll(SHELL_FILES)));
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    (async () => {
+      const names = await caches.keys();
+      await Promise.all(names.filter((n) => n !== SHELL).map((n) => caches.delete(n)));
+      await self.clients.claim();
+    })()
+  );
+});
+
+// Shell only. API responses are never cached — a stale notification list read
+// from disk is worse than an error, and /api/config must always be live or a
+// rotated VAPID key would go unnoticed.
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
+  // Caching the worker itself is how a bad deploy becomes permanent.
+  if (url.pathname === "/sw.js") return;
+
+  event.respondWith(
+    (async () => {
+      const cache = await caches.open(SHELL);
+      const cached = await cache.match(event.request, { ignoreSearch: true });
+      // Stale-while-revalidate: the shell paints instantly offline, and the
+      // next open has the new build.
+      const fresh = fetch(event.request)
+        .then((res) => {
+          if (res.ok) cache.put(event.request, res.clone());
+          return res;
+        })
+        .catch(() => cached);
+      return cached ?? fresh;
+    })()
+  );
+});
 
 self.addEventListener("push", (event) => {
   let data = {};
@@ -26,8 +68,37 @@ self.addEventListener("push", (event) => {
 
   // The ack races the notification rather than following it: showNotification
   // is what the user sees, so it must not wait on a network round trip.
-  event.waitUntil(Promise.all([self.registration.showNotification(title, options), ack(data)]));
+  event.waitUntil(
+    Promise.all([
+      self.registration.showNotification(title, options).then(coalesce),
+      ack(data),
+      notifyOpenTabs(),
+    ])
+  );
 });
+
+// A 7-day TTL means a device offline for days reconnects to a flood — FCM
+// queues around 100 per device. Past a handful, individual banners are noise,
+// so they collapse into one line the user can actually act on.
+const COALESCE_AT = 4;
+
+async function coalesce() {
+  const shown = await self.registration.getNotifications();
+  const individual = shown.filter((n) => n.tag !== "summary");
+  if (individual.length < COALESCE_AT) return;
+  for (const notification of individual) notification.close();
+  await self.registration.showNotification(`${individual.length} new notifications`, {
+    body: "Open Notifier to read them.",
+    tag: "summary",
+    renotify: true,
+    data: { url: "/" },
+  });
+}
+
+async function notifyOpenTabs() {
+  const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  for (const client of clients) client.postMessage({ type: "push" });
+}
 
 // Best-effort by design. A failed ack only costs one redundant retry from the
 // sender, so it must never reject and take the notification down with it.
@@ -44,12 +115,20 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = event.notification.data?.url || "/";
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+    (async () => {
+      const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      // Reuse an open window rather than stacking another one: on a phone the
+      // second window is indistinguishable from the first and the back button
+      // stops behaving.
       for (const client of clients) {
-        if ("focus" in client) return client.focus();
+        if ("focus" in client) {
+          await client.focus();
+          if (url !== "/" && "navigate" in client) await client.navigate(url).catch(() => {});
+          return;
+        }
       }
-      return self.clients.openWindow(url);
-    })
+      await self.clients.openWindow(url);
+    })()
   );
 });
 

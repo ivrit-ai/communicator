@@ -2,6 +2,7 @@ import { Router } from "express";
 import { ulid } from "ulid";
 import { withTx } from "../db.js";
 import { requireIngestToken } from "../auth-token.js";
+import { requireSameOrigin, requireSession } from "../auth-session.js";
 
 // Byte limits, not character limits. A thousand four-byte emoji pass a
 // 1000-character check and then fail at the push service at 4000 bytes, after
@@ -23,6 +24,24 @@ function checkField(name, value, { required = false } = {}) {
     return { error: `${name}_too_long`, bytes, limit: LIMITS[name] };
   }
   return { value };
+}
+
+// Commit first, deliver second: the notification and its fanout land in one
+// statement, so a container restart cannot lose an accepted send.
+async function insertAndFanOut(client, { createdAt, id, userSub, source, title, body, url }) {
+  const fanout = await client.query(
+    `WITH n AS (
+       INSERT INTO notifications (created_at, id, user_sub, source, title, body, url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING created_at, id
+     )
+     INSERT INTO deliveries (created_at, notification_id, device_id)
+     SELECT n.created_at, n.id, d.id
+       FROM n CROSS JOIN devices d
+      WHERE d.user_sub = $3`,
+    [createdAt, id, userSub, source, title, body, url]
+  );
+  return fanout.rowCount;
 }
 
 export function notifyRoutes(pool) {
@@ -80,21 +99,14 @@ export function notifyRoutes(pool) {
           }
         }
 
-        // Commit first, deliver second: the notification and its fanout land in
-        // one statement, so a container restart cannot lose an accepted send.
-        const fanout = await client.query(
-          `WITH n AS (
-             INSERT INTO notifications (created_at, id, user_sub, source, title, body, url)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING created_at, id
-           )
-           INSERT INTO deliveries (created_at, notification_id, device_id)
-           SELECT n.created_at, n.id, d.id
-             FROM n CROSS JOIN devices d
-            WHERE d.user_sub = $3`,
-          [createdAt, id, userSub, source, fields.title, fields.body, fields.url]
-        );
-        return { id, devices: fanout.rowCount, duplicate: false };
+        const devices = await insertAndFanOut(client, {
+          createdAt,
+          id,
+          userSub,
+          source,
+          ...fields,
+        });
+        return { id, devices, duplicate: false };
       });
 
       // 202, not 200: accepted for delivery, which is asynchronous by design.
@@ -103,6 +115,33 @@ export function notifyRoutes(pool) {
       next(err);
     }
   });
+
+  // Session-authenticated, because it exists to prove the round trip works on
+  // the device you are holding, before you have minted any token at all.
+  router.post(
+    "/api/test",
+    requireSession(pool),
+    requireSameOrigin,
+    async (req, res, next) => {
+      const at = Date.now();
+      try {
+        const devices = await withTx(pool, (client) =>
+          insertAndFanOut(client, {
+            createdAt: new Date(at),
+            id: ulid(at),
+            userSub: req.user.sub,
+            source: "notifier",
+            title: "Test notification",
+            body: "If you can see this, push is working on this device.",
+            url: null,
+          })
+        );
+        res.status(202).json({ devices });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
 
   return router;
 }

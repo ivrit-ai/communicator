@@ -3,21 +3,102 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1115" />
     <title>Notifier</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <header class="bar">
+      <span class="brand"><img src="/icons/icon-192.png" alt="" width="24" height="24" />Notifier</span>
+      <span id="who" class="who"></span>
+    </header>
+
+    <!-- The Home Screen cookie jar is separate from Safari's, so signing in
+         first yields a signed-out PWA and an inexplicable second login. -->
+    <aside id="ios-hint" class="note" hidden>
+      <strong>Install first, then sign in.</strong>
+      Tap <span class="key">Share</span> → <span class="key">Add to Home Screen</span>, open Notifier
+      from your Home Screen, and sign in there. iOS only delivers notifications to the installed app.
+    </aside>
+
     <main>
-      <h1>Notifier</h1>
-      <p>Push notifications for your scripts, jobs and devices.</p>
-      <p id="who">…</p>
-      <p>
-        <a id="signin" href="/xhost-auth/login?return_to=%2Fauth%2Fcomplete">Sign in with Google</a>
-        <button id="signout" hidden>Sign out</button>
-        <button id="enable" hidden>Enable notifications on this device</button>
-      </p>
-      <p id="devices"></p>
-      <p id="status"></p>
+      <section id="landing" hidden>
+        <h1>Notifications for your scripts</h1>
+        <p class="lede">
+          Give a CI job, cron script or home-automation rule one token, and it can raise a real
+          notification on your phone with a single HTTP request.
+        </p>
+        <a id="signin" class="primary" href="/xhost-auth/login?return_to=%2Fauth%2Fcomplete"
+          >Sign in with Google</a
+        >
+      </section>
+
+      <nav id="tabs" hidden>
+        <button data-view="feed" class="active">Notifications</button>
+        <button data-view="tokens">Tokens</button>
+        <button data-view="settings">Settings</button>
+      </nav>
+
+      <section id="view-feed" hidden>
+        <div class="row spread">
+          <h2>Notifications</h2>
+          <button id="mark-all" class="ghost">Mark all read</button>
+        </div>
+        <div id="feed"></div>
+        <button id="more" class="ghost wide" hidden>Load older</button>
+      </section>
+
+      <section id="view-tokens" hidden>
+        <h2>Tokens</h2>
+        <p class="lede">
+          One token per sending service. The source name shown on your phone comes from the token,
+          so a sender cannot pretend to be something else.
+        </p>
+        <form id="new-token" class="row">
+          <input id="token-name" maxlength="64" placeholder="e.g. github-actions" required />
+          <button class="primary" type="submit">Create</button>
+        </form>
+        <div id="token-reveal" hidden></div>
+        <div id="tokens"></div>
+      </section>
+
+      <section id="view-settings" hidden>
+        <h2>This device</h2>
+        <p id="permission" class="lede"></p>
+        <p class="row">
+          <button id="enable" class="primary" hidden>Enable notifications on this device</button>
+          <button id="test" class="ghost" hidden>Send a test notification</button>
+        </p>
+
+        <h2>Registered devices</h2>
+        <div id="devices"></div>
+
+        <h2>Diagnostics</h2>
+        <dl id="diagnostics"></dl>
+        <p class="row">
+          <button id="signout" class="ghost">Sign out</button>
+        </p>
+      </section>
     </main>
+
+    <!-- A soft prompt first: "Not now" is free, but a native "Block" is forever
+         and there is no API to ask again. -->
+    <dialog id="preprompt">
+      <h2>Allow notifications?</h2>
+      <p>
+        Your browser will ask next. If you block it, this site can never ask again — you would have
+        to re-allow it by hand in site settings.
+      </p>
+      <form method="dialog" class="row">
+        <button value="no" class="ghost">Not now</button>
+        <button value="yes" class="primary">Continue</button>
+      </form>
+    </dialog>
+
+    <div id="toast" hidden></div>
     <script type="module" src="/app.js"></script>
   </body>
 </html>
