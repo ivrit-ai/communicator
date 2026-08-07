@@ -12,6 +12,12 @@
   box-sizing: border-box;
 }
 
+/* Any rule that sets `display` outranks the UA sheet's `[hidden]`, so every
+   element toggled by the .hidden property needs this to actually disappear. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
