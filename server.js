@@ -8,6 +8,8 @@ import { authRoutes } from "./src/routes/auth.js";
 import { tokenRoutes } from "./src/routes/tokens.js";
 import { deviceRoutes } from "./src/routes/devices.js";
 import { notifyRoutes } from "./src/routes/notify.js";
+import { ackRoutes } from "./src/routes/ack.js";
+import { notificationRoutes } from "./src/routes/notifications.js";
 import { superviseSender } from "./src/supervise.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -81,6 +83,8 @@ app.use(authRoutes(pool));
 app.use(tokenRoutes(pool));
 app.use(deviceRoutes(pool));
 app.use(notifyRoutes(pool));
+app.use(ackRoutes(pool));
+app.use(notificationRoutes(pool));
 
 app.use((err, req, res, next) => {
   console.error(JSON.stringify({ msg: "unhandled", path: req.path, err: String(err) }));

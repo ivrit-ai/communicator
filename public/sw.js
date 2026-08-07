@@ -24,8 +24,21 @@ self.addEventListener("push", (event) => {
     tag: data.i ? `n-${data.i}` : undefined,
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  // The ack races the notification rather than following it: showNotification
+  // is what the user sees, so it must not wait on a network round trip.
+  event.waitUntil(Promise.all([self.registration.showNotification(title, options), ack(data)]));
 });
+
+// Best-effort by design. A failed ack only costs one redundant retry from the
+// sender, so it must never reject and take the notification down with it.
+function ack(data) {
+  if (!data.i || !data.k || !data.d) return Promise.resolve();
+  return fetch("/api/ack", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ i: data.i, d: data.d, k: data.k }),
+  }).catch(() => {});
+}
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
