@@ -3,6 +3,7 @@ import { ulid } from "ulid";
 import { withTx } from "../db.js";
 import { requireIngestToken } from "../auth-token.js";
 import { requireSameOrigin, requireSession } from "../auth-session.js";
+import { rateLimitIngest } from "../rate-limit.js";
 
 // Byte limits, not character limits. A thousand four-byte emoji pass a
 // 1000-character check and then fail at the push service at 4000 bytes, after
@@ -49,7 +50,7 @@ export function notifyRoutes(pool) {
 
   // Bearer only. This never touches the cookie middleware, which makes it
   // structurally impossible for CSRF to reach the ingest path.
-  router.post("/api/notify", requireIngestToken(pool), async (req, res, next) => {
+  router.post("/api/notify", requireIngestToken(pool), rateLimitIngest, async (req, res, next) => {
     const fields = {};
     for (const [name, opts] of [
       ["title", { required: true }],

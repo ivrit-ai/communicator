@@ -11,6 +11,7 @@ import { notifyRoutes } from "./src/routes/notify.js";
 import { ackRoutes } from "./src/routes/ack.js";
 import { notificationRoutes } from "./src/routes/notifications.js";
 import { superviseSender } from "./src/supervise.js";
+import { startMaintenance } from "./src/maintenance.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -41,6 +42,7 @@ requireEnv("EXPECTED_HOSTS");
 // slow migration degrades to a clear 503 instead of a failed health check.
 let ready = false;
 let sender = null;
+let maintenance = null;
 
 const pool = createPool("web");
 
@@ -113,6 +115,7 @@ async function boot() {
   await migrate(pool);
   // Only after migrations, so the sender can never query a half-built schema.
   sender = superviseSender();
+  maintenance = startMaintenance(pool);
   probeEgress();
 }
 
@@ -151,6 +154,7 @@ function shutdown(signal) {
   // Stop accepting, then let the sender drain. Anything it does not finish is
   // durable: the lease expires and the next container reclaims it.
   sender?.stop();
+  maintenance?.stop();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 8000).unref();
 }

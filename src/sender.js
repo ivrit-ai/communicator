@@ -109,6 +109,14 @@ async function markSent(row, status) {
       WHERE created_at = $1 AND notification_id = $2 AND device_id = $3`,
     [...keyOf(row), status]
   );
+  // Throttled to once a day: this exists so the idle-device reaper can tell a
+  // live endpoint from an abandoned one, not to keep a precise timestamp, and
+  // an extra write per delivery is pure amplification on the hot path.
+  await pool.query(
+    `UPDATE devices SET last_seen_at = now()
+      WHERE id = $1 AND last_seen_at < now() - interval '1 day'`,
+    [row.device_id]
+  );
 }
 
 async function markFailed(row, status, error) {
