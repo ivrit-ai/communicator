@@ -8,6 +8,7 @@ import { authRoutes } from "./src/routes/auth.js";
 import { tokenRoutes } from "./src/routes/tokens.js";
 import { deviceRoutes } from "./src/routes/devices.js";
 import { notifyRoutes } from "./src/routes/notify.js";
+import { superviseSender } from "./src/supervise.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -37,6 +38,7 @@ requireEnv("EXPECTED_HOSTS");
 // Flipped once migrations have run. /api/* refuses to serve until then, so a
 // slow migration degrades to a clear 503 instead of a failed health check.
 let ready = false;
+let sender = null;
 
 const pool = createPool("web");
 
@@ -105,6 +107,8 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
 
 async function boot() {
   await migrate(pool);
+  // Only after migrations, so the sender can never query a half-built schema.
+  sender = superviseSender();
   probeEgress();
 }
 
@@ -140,6 +144,9 @@ function probeEgress() {
 
 function shutdown(signal) {
   console.log(JSON.stringify({ msg: "shutdown", signal }));
+  // Stop accepting, then let the sender drain. Anything it does not finish is
+  // durable: the lease expires and the next container reclaims it.
+  sender?.stop();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 8000).unref();
 }

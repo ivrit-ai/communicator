@@ -11,7 +11,10 @@ self.addEventListener("push", (event) => {
     // Fall through to the placeholder below rather than dropping the push.
   }
 
-  const title = data.t || "Notification";
+  // The source is prefixed rather than tucked into the body: on a locked phone
+  // the title is often all that is visible, and "which service is this from" is
+  // the first thing you need to know.
+  const title = data.s ? `${data.s} — ${data.t}` : data.t || "Notification";
   const options = {
     body: data.b || "",
     data: { url: data.u || "/", id: data.i },
