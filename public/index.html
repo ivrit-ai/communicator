@@ -1,118 +1,239 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#F3EFE6" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#14130F" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Messages from the services you use, as notifications on your devices." />
     <title>Notifier</title>
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icons/icon-192.png" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="icon" href="/icons/mark.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/ibm-plex-sans-hebrew-latin-400.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/fonts/fonts.css" />
     <link rel="stylesheet" href="/styles.css" />
+    <script src="/store.js"></script>
   </head>
   <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13.5h4.2l1.6 2.5h5.4l1.6-2.5h4.2" /><path d="M5.6 5.5h12.8l2.1 8v4a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-4z" /></symbol>
+        <symbol id="i-sources" viewBox="0 0 24 24"><path d="M9.5 14.5l5-5" /><path d="M11 6.5l1.8-1.8a4 4 0 0 1 5.6 5.6L16.6 12" /><path d="M13 17.5l-1.8 1.8a4 4 0 0 1-5.6-5.6L7.4 12" /></symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></symbol>
+        <symbol id="i-admin" viewBox="0 0 24 24"><path d="M12 3.5l7 2.8v5.2c0 4.3-2.9 7.6-7 9-4.1-1.4-7-4.7-7-9V6.3z" /><path d="M9 12l2 2 4-4" /></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" /><path d="M15.5 15.5L20 20" /></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5" /><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" /></symbol>
+        <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V4M8 7.5L12 3.8l4 3.7" /><path d="M7 11H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1" /></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 7V5h4v2M6.5 7l.8 11.2a2 2 0 0 0 2 1.8h5.4a2 2 0 0 0 2-1.8L17.5 7" /></symbol>
+        <symbol id="i-external" viewBox="0 0 24 24"><path d="M13.5 4.5h6v6M19.5 4.5l-8 8" /><path d="M17.5 14v3.5a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2H10" /></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" /></symbol>
+        <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+        <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 1.5H5z" /><path d="M10 20.5h4" /></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></symbol>
+      </defs>
+    </svg>
+
     <header class="bar">
-      <span class="brand"><img src="/icons/icon-192.png" alt="" width="24" height="24" />Notifier</span>
-      <span id="who" class="who"></span>
+      <a class="brand" href="/" aria-label="Notifier">
+        <img src="/icons/mark.svg" alt="" width="30" height="30" />
+        <span class="wordmark" data-i18n="brand">Notifier</span>
+      </a>
+      <div class="bar-end">
+        <div class="seg" id="lang-switch" role="group" aria-label="Language">
+          <button type="button" data-locale="en">EN</button>
+          <button type="button" data-locale="he">עב</button>
+        </div>
+        <nav id="tabs" class="tabs" hidden>
+          <button type="button" data-view="inbox"><svg class="i"><use href="#i-inbox" /></svg><span data-i18n="tabInbox">Inbox</span><b id="unread-badge" class="count" hidden></b></button>
+          <button type="button" data-view="sources"><svg class="i"><use href="#i-sources" /></svg><span data-i18n="tabSources">Sources</span></button>
+          <button type="button" data-view="settings"><svg class="i"><use href="#i-settings" /></svg><span data-i18n="tabSettings">Settings</span></button>
+          <button type="button" data-view="admin" hidden><svg class="i"><use href="#i-admin" /></svg><span data-i18n="tabAdmin">Admin</span></button>
+        </nav>
+      </div>
     </header>
 
     <!-- Shown only once the browser has fired beforeinstallprompt, i.e. only
          when installing would actually succeed. iOS never fires it and gets
          the hint below instead. -->
-    <aside id="install-hint" class="note" hidden>
-      <div class="row spread">
-        <span>
-          <strong>Install Notifier.</strong> It opens like an app, and notifications keep arriving
-          when the browser is closed.
-        </span>
-        <button id="install" class="primary">Install</button>
+    <aside id="install-hint" class="banner" hidden>
+      <div>
+        <strong data-i18n="installTitle">Install Notifier</strong>
+        <span data-i18n="installBody"></span>
       </div>
+      <button id="install" class="btn primary small" type="button" data-i18n="install">Install</button>
     </aside>
 
     <!-- The Home Screen cookie jar is separate from Safari's, so signing in
          first yields a signed-out PWA and an inexplicable second login. -->
-    <aside id="ios-hint" class="note" hidden>
-      <strong>Install first, then sign in.</strong>
-      Tap <span class="key">Share</span> → <span class="key">Add to Home Screen</span>, open Notifier
-      from your Home Screen, and sign in there. iOS only delivers notifications to the installed app.
+    <aside id="ios-hint" class="banner" hidden>
+      <div>
+        <strong data-i18n="iosHintTitle"></strong>
+        <span data-i18n="iosHintBody"></span>
+      </div>
     </aside>
 
-    <main>
-      <section id="landing" hidden>
-        <h1>Notifications for your scripts</h1>
-        <p class="lede">
-          Give a CI job, cron script or home-automation rule one token, and it can raise a real
-          notification on your phone with a single HTTP request.
-        </p>
-        <a id="signin" class="primary" href="/xhost-auth/login?return_to=%2Fauth%2Fcomplete"
-          >Sign in with Google</a
-        >
-      </section>
-
-      <nav id="tabs" hidden>
-        <button data-view="feed" class="active">Notifications</button>
-        <button data-view="tokens">Tokens</button>
-        <button data-view="settings">Settings</button>
-      </nav>
-
-      <section id="view-feed" hidden>
-        <div class="row spread">
-          <h2>Notifications</h2>
-          <button id="mark-all" class="ghost">Mark all read</button>
+    <main id="main">
+      <section id="landing" class="landing" hidden>
+        <div class="landing-copy">
+          <p class="kicker" data-i18n="landingKicker"></p>
+          <h1 data-i18n="landingTitle"></h1>
+          <p class="lede" data-i18n="landingLede"></p>
+          <ul class="points">
+            <li><svg class="i"><use href="#i-sources" /></svg><span data-i18n="pointLink"></span></li>
+            <li><svg class="i"><use href="#i-inbox" /></svg><span data-i18n="pointDevice"></span></li>
+            <li><svg class="i"><use href="#i-bell" /></svg><span data-i18n="pointFree"></span></li>
+          </ul>
+          <div class="cta">
+            <a id="signin" class="btn primary large" href="/xhost-auth/login?return_to=%2Fauth%2Fcomplete">
+              <svg class="g" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34.1 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34.1 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+              <span data-i18n="continueGoogle"></span>
+            </a>
+            <button id="anon" class="btn quiet" type="button" data-i18n="continueAnon"></button>
+            <p class="fine" data-i18n="anonCaveat"></p>
+          </div>
         </div>
-        <div id="feed"></div>
-        <button id="more" class="ghost wide" hidden>Load older</button>
+        <div class="landing-art" aria-hidden="true">
+          <div class="slip s1" dir="rtl">
+            <span class="avatar mono" style="--hue: 28">א</span>
+            <div>
+              <div class="slip-head"><b>אליעזר</b><span>תמלול הקלטה · 0:42</span></div>
+              <p>היי, רק רציתי לעדכן שהגעתי. נדבר בערב, יש לי המון לספר לך.</p>
+            </div>
+          </div>
+          <div class="slip s2" dir="ltr">
+            <span class="avatar mono" style="--hue: 210">g</span>
+            <div>
+              <div class="slip-head"><b>github-actions</b><span>2 min</span></div>
+              <p><strong>Deploy finished</strong> — main → production in 3m 12s.</p>
+            </div>
+          </div>
+          <div class="slip s3" dir="ltr">
+            <span class="avatar mono" style="--hue: 140">h</span>
+            <div>
+              <div class="slip-head"><b>home</b><span>just now</span></div>
+              <p>Front door opened.</p>
+            </div>
+          </div>
+        </div>
       </section>
 
-      <section id="view-tokens" hidden>
-        <h2>Tokens</h2>
-        <p class="lede">
-          One token per sending service. The source name shown on your phone comes from the token,
-          so a sender cannot pretend to be something else.
-        </p>
-        <form id="new-token" class="row">
-          <input id="token-name" maxlength="64" placeholder="e.g. github-actions" required />
-          <button class="primary" type="submit">Create</button>
+      <section id="view-inbox" class="view" hidden>
+        <div class="toolbar">
+          <label class="search">
+            <svg class="i"><use href="#i-search" /></svg>
+            <input id="search" type="search" autocomplete="off" data-i18n-placeholder="search" />
+          </label>
+          <button id="mark-all" class="btn quiet small" type="button" data-i18n="markAllRead"></button>
+        </div>
+        <div id="chips" class="chips" role="tablist"></div>
+        <div id="feed" class="feed" aria-live="polite"></div>
+      </section>
+
+      <section id="view-sources" class="view" hidden>
+        <h2 class="title" data-i18n="sourcesTitle"></h2>
+        <p class="lede" data-i18n="sourcesLede"></p>
+        <div id="sources" class="stack"></div>
+
+        <h2 class="title minor" data-i18n="scriptsTitle"></h2>
+        <p class="lede" data-i18n="scriptsLede"></p>
+        <form id="new-token" class="inline-form">
+          <input id="token-name" maxlength="64" required data-i18n-placeholder="tokenPlaceholder" />
+          <button class="btn primary" type="submit" data-i18n="create"></button>
         </form>
-        <div id="token-reveal" hidden></div>
-        <div id="tokens"></div>
+        <div id="token-reveal" class="reveal" hidden></div>
+        <div id="tokens" class="stack"></div>
       </section>
 
-      <section id="view-settings" hidden>
-        <h2>This device</h2>
-        <p id="permission" class="lede"></p>
-        <p class="row">
-          <button id="enable" class="primary" hidden>Enable notifications on this device</button>
-          <button id="test" class="ghost" hidden>Send a test notification</button>
-        </p>
+      <section id="view-settings" class="view" hidden>
+        <div id="account" class="panel"></div>
 
-        <h2>Registered devices</h2>
-        <div id="devices"></div>
+        <div class="panel">
+          <h3 data-i18n="languageTitle"></h3>
+          <div class="seg wide" id="lang-setting" role="group">
+            <button type="button" data-locale="en">English</button>
+            <button type="button" data-locale="he">עברית</button>
+          </div>
+        </div>
 
-        <h2>Diagnostics</h2>
-        <dl id="diagnostics"></dl>
-        <p class="row">
-          <button id="signout" class="ghost">Sign out</button>
-        </p>
+        <div class="panel">
+          <h3 data-i18n="notificationsTitle"></h3>
+          <p id="permission" class="muted"></p>
+          <div class="row">
+            <button id="enable" class="btn primary" type="button" hidden data-i18n="enable"></button>
+            <button id="test" class="btn" type="button" hidden data-i18n="sendTest"></button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3 data-i18n="devicesTitle"></h3>
+          <div id="devices" class="list"></div>
+        </div>
+
+        <div class="panel">
+          <h3 data-i18n="storageTitle"></h3>
+          <p id="storage" class="muted"></p>
+          <div class="row"><button id="clear-history" class="btn" type="button" data-i18n="clearHistory"></button></div>
+        </div>
+
+        <details class="panel diag">
+          <summary data-i18n="diagnostics"></summary>
+          <dl id="diagnostics"></dl>
+        </details>
+
+        <div class="row end">
+          <button id="signout" class="btn" type="button" data-i18n="signOut"></button>
+          <button id="delete-account" class="btn danger" type="button" data-i18n="deleteAccount"></button>
+        </div>
+      </section>
+
+      <section id="view-admin" class="view" hidden>
+        <div class="row spread">
+          <div>
+            <h2 class="title" data-i18n="adminTitle"></h2>
+            <p class="lede" data-i18n="adminLede"></p>
+          </div>
+          <button id="new-source" class="btn primary" type="button">
+            <svg class="i"><use href="#i-plus" /></svg><span data-i18n="newSource"></span>
+          </button>
+        </div>
+        <div id="admin-reveal" class="reveal" hidden></div>
+        <div id="admin-sources" class="stack"></div>
       </section>
     </main>
 
     <!-- A soft prompt first: "Not now" is free, but a native "Block" is forever
          and there is no API to ask again. -->
-    <dialog id="preprompt">
-      <h2>Allow notifications?</h2>
-      <p>
-        Your browser will ask next. If you block it, this site can never ask again — you would have
-        to re-allow it by hand in site settings.
-      </p>
-      <form method="dialog" class="row">
-        <button value="no" class="ghost">Not now</button>
-        <button value="yes" class="primary">Continue</button>
+    <dialog id="preprompt" class="dialog">
+      <h2 data-i18n="prepromptTitle"></h2>
+      <p data-i18n="prepromptBody"></p>
+      <form method="dialog" class="row end">
+        <button value="no" class="btn quiet" data-i18n="notNow"></button>
+        <button value="yes" class="btn primary" data-i18n="continue"></button>
       </form>
     </dialog>
 
-    <div id="toast" hidden></div>
+    <dialog id="confirm" class="dialog">
+      <p id="confirm-text"></p>
+      <form method="dialog" class="row end">
+        <button value="no" class="btn quiet" data-i18n="cancel"></button>
+        <button value="yes" id="confirm-ok" class="btn primary"></button>
+      </form>
+    </dialog>
+
+    <dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+      <header class="sheet-head">
+        <div id="sheet-avatar"></div>
+        <h2 id="sheet-title"></h2>
+        <button id="sheet-close" class="icon-btn" type="button" data-i18n-label="cancel">
+          <svg class="i"><use href="#i-close" /></svg>
+        </button>
+      </header>
+      <div id="sheet-body"></div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" hidden><span id="toast-text"></span><button id="toast-action" type="button" hidden></button></div>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

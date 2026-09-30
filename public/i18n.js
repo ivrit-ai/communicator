@@ -1,0 +1,403 @@
+// Every string the UI shows, in both languages. Functions for anything with a
+// number or a name in it, so word order is the translation's business.
+const STRINGS = {
+  en: {
+    brand: "Notifier",
+    landingKicker: "Your services, delivered",
+    landingTitle: "Every message from the services you use, in one quiet inbox.",
+    landingLede:
+      "Link Eliezer or your own scripts once. Their messages arrive as notifications on every device you choose, and stay on those devices.",
+    pointLink: "Link with a short code — no phone number, no password.",
+    pointDevice: "Kept on your devices. The server forgets after three days.",
+    pointFree: "Free, and no WhatsApp fees for anyone.",
+    continueGoogle: "Continue with Google",
+    continueAnon: "Continue without an account",
+    anonCaveat: "Without an account, your inbox lives only in this browser.",
+    iosHintTitle: "Install first, then sign in.",
+    iosHintBody:
+      "Tap Share → Add to Home Screen, open Notifier from your Home Screen, and continue there. iOS only delivers notifications to the installed app.",
+    installTitle: "Install Notifier",
+    installBody: "Opens like an app, and notifications keep arriving when the browser is closed.",
+    install: "Install",
+    installLater: "You can install later from the browser menu.",
+
+    tabInbox: "Inbox",
+    tabSources: "Sources",
+    tabSettings: "Settings",
+    tabAdmin: "Admin",
+
+    search: "Search messages",
+    all: "All",
+    markAllRead: "Mark all read",
+    today: "Today",
+    yesterday: "Yesterday",
+    justNow: "just now",
+    minutesAgo: (n) => `${n} min ago`,
+    hoursAgo: (n) => `${n} h ago`,
+    showMore: "Show more",
+    showLess: "Show less",
+    copy: "Copy",
+    copied: "Copied.",
+    share: "Share",
+    delete: "Delete",
+    deleted: "Deleted from this device.",
+    undo: "Undo",
+    openLink: "Open link",
+    loadingFull: "Fetching the full text…",
+    emptyTitle: "Nothing here yet",
+    emptyBody: "Link a source and its messages will land here.",
+    emptyAction: "Link a source",
+    noMatches: "No messages match.",
+
+    sourcesTitle: "Sources",
+    sourcesLede: "Services that can send to you. Linking one takes a short code and a single message.",
+    link: "Link",
+    linkAnother: "Link another",
+    linked: "Linked",
+    notLinked: "Not linked",
+    unlink: "Unlink",
+    unlinkConfirm: (name) => `Stop receiving messages from ${name} here?`,
+    unlinked: "Unlinked.",
+    lastMessage: (when) => `last message ${when}`,
+    noMessagesYet: "no messages yet",
+    noSources: "No sources are available yet.",
+    scriptsTitle: "Scripts & API",
+    scriptsLede:
+      "Your own tokens, for CI jobs, cron scripts and home automation. The name shown on each message comes from the token, so a sender can't pretend to be something else.",
+    tokenPlaceholder: "e.g. github-actions",
+    create: "Create",
+    tokenOnce: "Copy this now. It is shown once and can't be read back.",
+    copyToken: "Copy token",
+    sendFrom: (name) => `Send from ${name}:`,
+    revoke: "Revoke",
+    revokeConfirm: (name) => `Revoke "${name}"? Anything using it stops working immediately.`,
+    revoked: "Token revoked.",
+    neverUsed: "never used",
+    usedAgo: (when) => `last used ${when}`,
+    noTokens: "No tokens yet.",
+
+    sheetTitle: (name) => `Link ${name}`,
+    stepNotify: "First, allow notifications on this device, so messages can reach you.",
+    enableHere: "Allow notifications",
+    stepSend: "Send this code to",
+    orSendText: "Or send this message yourself:",
+    waiting: "Waiting for your message",
+    expiresIn: (t) => `Code expires in ${t}`,
+    linkedAs: (label) => `Linked${label ? ` · ${label}` : ""}`,
+    linkedBody: "New messages will arrive here and on every device you've allowed.",
+    done: "Done",
+    codeExpired: "This code has expired.",
+    codeTriedExpired: "That code had already expired when it arrived.",
+    newCode: "Get a new code",
+    tooManyLinks: "You've reached the limit of linked sources.",
+
+    accountTitle: "Account",
+    signedInAs: (email) => `Signed in as ${email}`,
+    anonymousTitle: "No account",
+    anonymousBody:
+      "Your inbox and links live only in this browser. Sign in with Google to keep them safe and to use Notifier on more than one device — everything you have now comes along.",
+    upgrade: "Sign in with Google",
+    upgraded: "Your inbox is now tied to your Google account.",
+    signOut: "Sign out",
+    signOutConfirm: "Sign out? Messages already on this device will be removed from it.",
+    signOutAnonConfirm:
+      "Signing out of an account without Google deletes it for good, with every link. Continue?",
+    deleteAccount: "Delete account",
+    deleteConfirm:
+      "Delete your account, every link and every registered device? Messages on this device are removed too. This can't be undone.",
+    languageTitle: "Language",
+    notificationsTitle: "Notifications on this device",
+    permUnsupported: "This browser doesn't support push notifications.",
+    permDefault: "Not enabled on this device yet.",
+    permGranted: "Enabled on this device.",
+    permDenied: "Blocked. Browsers can't ask again — re-allow notifications in this site's settings.",
+    enable: "Enable",
+    sendTest: "Send a test",
+    testSent: (n) => (n ? `Sent to ${n} device${n === 1 ? "" : "s"}.` : "No devices registered yet."),
+    registered: "This device is registered.",
+    devicesTitle: "Devices",
+    thisDevice: "this device",
+    added: (date) => `added ${date}`,
+    remove: "Remove",
+    noDevices: "No devices registered yet.",
+    storageTitle: "Stored on this device",
+    storageBody: (n) => `${n} message${n === 1 ? "" : "s"}. The server keeps three days; this device keeps everything until you delete it.`,
+    clearHistory: "Clear history on this device",
+    clearConfirm: "Remove every message from this device? This can't be undone.",
+    cleared: "History cleared.",
+    diagnostics: "Diagnostics",
+    installed: "Installed",
+    yes: "yes",
+    noTab: "no (browser tab)",
+    permission: "Permission",
+    serviceWorker: "Service worker",
+    pushService: "Push service",
+    notSubscribed: "not subscribed",
+
+    prepromptTitle: "Allow notifications?",
+    prepromptBody:
+      "Your browser will ask next. If you block it, this site can never ask again — you'd have to re-allow it in site settings.",
+    notNow: "Not now",
+    continue: "Continue",
+    cancel: "Cancel",
+
+    adminTitle: "Sources",
+    adminLede: "Services that deliver to linked users. Each authenticates with its own key.",
+    newSource: "New source",
+    edit: "Edit",
+    save: "Save",
+    saved: "Saved.",
+    fieldId: "ID (slug, permanent)",
+    fieldName: "Name",
+    fieldNameHe: "Name (Hebrew)",
+    fieldDescription: "Description",
+    fieldDescriptionHe: "Description (Hebrew)",
+    fieldAccent: "Accent",
+    fieldRate: "Messages per minute (all users)",
+    fieldEnabled: "Enabled",
+    methodsTitle: "Link methods",
+    methodsHint: "Use {code} where the link code goes. A URL opens the app with the message prefilled.",
+    methodLabel: "Label",
+    methodLabelHe: "Label (Hebrew)",
+    methodUrl: "URL template",
+    methodText: "Message template",
+    addMethod: "Add method",
+    icon: "Logo",
+    uploadIcon: "Upload logo",
+    iconUpdated: "Logo updated.",
+    rotateKey: "Rotate key",
+    rotateConfirm: "Rotate this key? The current one stops working immediately.",
+    keyOnce: "The source's key. Shown once — store it in the source's environment now.",
+    keyPrefix: (p) => `key ${p}…`,
+    subscribers: (n) => `${n} linked`,
+    disabled: "disabled",
+    deleteSource: "Delete source",
+    deleteSourceConfirm: (name) => `Delete ${name} and every link to it? This can't be undone.`,
+    preview: "Notification preview",
+    previewBody: "תמלול לדוגמה: כך ייראה הטקסט בהתראה.",
+
+    offline: "Offline — showing what's on this device.",
+    error: (msg) => `Something went wrong: ${msg}`,
+  },
+
+  he: {
+    brand: "Notifier",
+    landingKicker: "השירותים שלכם, כהתראות",
+    landingTitle: "כל ההודעות מהשירותים שלכם, בתיבה אחת שקטה.",
+    landingLede:
+      "מקשרים פעם אחת את אליעזר או סקריפטים משלכם. ההודעות מגיעות כהתראות לכל מכשיר שתבחרו, ונשמרות בו.",
+    pointLink: "קישור בקוד קצר — בלי מספר טלפון ובלי סיסמה.",
+    pointDevice: "נשמר במכשירים שלכם. השרת שוכח אחרי שלושה ימים.",
+    pointFree: "חינם, ובלי עלויות וואטסאפ לאף אחד.",
+    continueGoogle: "המשך עם Google",
+    continueAnon: "המשך בלי חשבון",
+    anonCaveat: "בלי חשבון, התיבה שלכם קיימת רק בדפדפן הזה.",
+    iosHintTitle: "קודם מתקינים, אחר כך נכנסים.",
+    iosHintBody:
+      "הקישו שיתוף ← הוספה למסך הבית, פתחו את Notifier ממסך הבית והמשיכו משם. ב-iOS התראות מגיעות רק לאפליקציה המותקנת.",
+    installTitle: "התקנת Notifier",
+    installBody: "נפתח כמו אפליקציה, וההתראות ממשיכות להגיע גם כשהדפדפן סגור.",
+    install: "התקנה",
+    installLater: "אפשר להתקין מאוחר יותר מתפריט הדפדפן.",
+
+    tabInbox: "הודעות",
+    tabSources: "מקורות",
+    tabSettings: "הגדרות",
+    tabAdmin: "ניהול",
+
+    search: "חיפוש בהודעות",
+    all: "הכול",
+    markAllRead: "סימון הכול כנקרא",
+    today: "היום",
+    yesterday: "אתמול",
+    justNow: "עכשיו",
+    minutesAgo: (n) => `לפני ${n} דק׳`,
+    hoursAgo: (n) => `לפני ${n} שע׳`,
+    showMore: "הצגת הכול",
+    showLess: "הצגת פחות",
+    copy: "העתקה",
+    copied: "הועתק.",
+    share: "שיתוף",
+    delete: "מחיקה",
+    deleted: "נמחק מהמכשיר הזה.",
+    undo: "ביטול",
+    openLink: "פתיחת הקישור",
+    loadingFull: "טוען את הטקסט המלא…",
+    emptyTitle: "עדיין אין כאן כלום",
+    emptyBody: "קשרו מקור, וההודעות שלו יגיעו לכאן.",
+    emptyAction: "קישור מקור",
+    noMatches: "אין הודעות תואמות.",
+
+    sourcesTitle: "מקורות",
+    sourcesLede: "שירותים שיכולים לשלוח אליכם. הקישור לוקח קוד קצר והודעה אחת.",
+    link: "קישור",
+    linkAnother: "קישור נוסף",
+    linked: "מקושר",
+    notLinked: "לא מקושר",
+    unlink: "ביטול קישור",
+    unlinkConfirm: (name) => `להפסיק לקבל כאן הודעות מ${name}?`,
+    unlinked: "הקישור בוטל.",
+    lastMessage: (when) => `הודעה אחרונה ${when}`,
+    noMessagesYet: "עדיין אין הודעות",
+    noSources: "עדיין אין מקורות זמינים.",
+    scriptsTitle: "סקריפטים ו-API",
+    scriptsLede:
+      "טוקנים משלכם, ל-CI, לסקריפטים מתוזמנים ולבית חכם. השם שמופיע על כל הודעה נלקח מהטוקן, כך ששולח לא יכול להתחזות למשהו אחר.",
+    tokenPlaceholder: "למשל github-actions",
+    create: "יצירה",
+    tokenOnce: "העתיקו עכשיו. הטוקן מוצג פעם אחת בלבד.",
+    copyToken: "העתקת הטוקן",
+    sendFrom: (name) => `שליחה מ-${name}:`,
+    revoke: "ביטול",
+    revokeConfirm: (name) => `לבטל את "${name}"? כל מה שמשתמש בו יפסיק לעבוד מיד.`,
+    revoked: "הטוקן בוטל.",
+    neverUsed: "לא היה בשימוש",
+    usedAgo: (when) => `שימוש אחרון ${when}`,
+    noTokens: "עדיין אין טוקנים.",
+
+    sheetTitle: (name) => `קישור ${name}`,
+    stepNotify: "קודם, אפשרו התראות במכשיר הזה כדי שההודעות יוכלו להגיע.",
+    enableHere: "אישור התראות",
+    stepSend: "שלחו את הקוד אל",
+    orSendText: "או שלחו בעצמכם את ההודעה:",
+    waiting: "ממתין להודעה שלכם",
+    expiresIn: (t) => `תוקף הקוד יפוג בעוד ${t}`,
+    linkedAs: (label) => `מקושר${label ? ` · ${label}` : ""}`,
+    linkedBody: "הודעות חדשות יגיעו לכאן ולכל מכשיר שאישרתם.",
+    done: "סיום",
+    codeExpired: "תוקף הקוד פג.",
+    codeTriedExpired: "הקוד הגיע אחרי שתוקפו כבר פג.",
+    newCode: "קוד חדש",
+    tooManyLinks: "הגעתם למספר המרבי של מקורות מקושרים.",
+
+    accountTitle: "חשבון",
+    signedInAs: (email) => `מחוברים בתור ${email}`,
+    anonymousTitle: "ללא חשבון",
+    anonymousBody:
+      "התיבה והקישורים שלכם קיימים רק בדפדפן הזה. התחברו עם Google כדי לשמור עליהם ולהשתמש ב-Notifier ביותר ממכשיר אחד — כל מה שיש לכם עכשיו יעבור איתכם.",
+    upgrade: "התחברות עם Google",
+    upgraded: "התיבה שלכם מחוברת עכשיו לחשבון Google.",
+    signOut: "התנתקות",
+    signOutConfirm: "להתנתק? ההודעות שכבר במכשיר הזה יימחקו ממנו.",
+    signOutAnonConfirm: "התנתקות מחשבון בלי Google מוחקת אותו לצמיתות, עם כל הקישורים. להמשיך?",
+    deleteAccount: "מחיקת החשבון",
+    deleteConfirm: "למחוק את החשבון, את כל הקישורים ואת כל המכשירים הרשומים? גם ההודעות במכשיר הזה יימחקו. אי אפשר לבטל.",
+    languageTitle: "שפה",
+    notificationsTitle: "התראות במכשיר הזה",
+    permUnsupported: "הדפדפן הזה לא תומך בהתראות.",
+    permDefault: "עדיין לא הופעלו במכשיר הזה.",
+    permGranted: "מופעלות במכשיר הזה.",
+    permDenied: "חסומות. הדפדפן לא יכול לבקש שוב — אפשרו התראות בהגדרות האתר.",
+    enable: "הפעלה",
+    sendTest: "שליחת בדיקה",
+    testSent: (n) => (n ? `נשלח ל-${n} מכשירים.` : "עדיין אין מכשירים רשומים."),
+    registered: "המכשיר הזה רשום.",
+    devicesTitle: "מכשירים",
+    thisDevice: "המכשיר הזה",
+    added: (date) => `נוסף ${date}`,
+    remove: "הסרה",
+    noDevices: "עדיין אין מכשירים רשומים.",
+    storageTitle: "שמור במכשיר הזה",
+    storageBody: (n) => `${n} הודעות. השרת שומר שלושה ימים; המכשיר הזה שומר הכול עד שתמחקו.`,
+    clearHistory: "מחיקת ההיסטוריה מהמכשיר",
+    clearConfirm: "למחוק את כל ההודעות מהמכשיר הזה? אי אפשר לבטל.",
+    cleared: "ההיסטוריה נמחקה.",
+    diagnostics: "אבחון",
+    installed: "מותקן",
+    yes: "כן",
+    noTab: "לא (לשונית דפדפן)",
+    permission: "הרשאה",
+    serviceWorker: "Service worker",
+    pushService: "שירות התראות",
+    notSubscribed: "לא רשום",
+
+    prepromptTitle: "לאפשר התראות?",
+    prepromptBody: "הדפדפן ישאל מיד. אם תחסמו, האתר לא יוכל לבקש שוב — תצטרכו לאפשר ידנית בהגדרות האתר.",
+    notNow: "לא עכשיו",
+    continue: "המשך",
+    cancel: "ביטול",
+
+    adminTitle: "מקורות",
+    adminLede: "שירותים ששולחים למשתמשים מקושרים. כל אחד מזדהה במפתח משלו.",
+    newSource: "מקור חדש",
+    edit: "עריכה",
+    save: "שמירה",
+    saved: "נשמר.",
+    fieldId: "מזהה (קבוע)",
+    fieldName: "שם",
+    fieldNameHe: "שם (עברית)",
+    fieldDescription: "תיאור",
+    fieldDescriptionHe: "תיאור (עברית)",
+    fieldAccent: "צבע",
+    fieldRate: "הודעות לדקה (לכל המשתמשים)",
+    fieldEnabled: "פעיל",
+    methodsTitle: "דרכי קישור",
+    methodsHint: "כתבו {code} במקום שבו יופיע הקוד. כתובת פותחת את האפליקציה עם ההודעה מוכנה.",
+    methodLabel: "תווית",
+    methodLabelHe: "תווית (עברית)",
+    methodUrl: "תבנית כתובת",
+    methodText: "תבנית הודעה",
+    addMethod: "הוספת דרך",
+    icon: "לוגו",
+    uploadIcon: "העלאת לוגו",
+    iconUpdated: "הלוגו עודכן.",
+    rotateKey: "החלפת מפתח",
+    rotateConfirm: "להחליף את המפתח? הנוכחי יפסיק לעבוד מיד.",
+    keyOnce: "המפתח של המקור. מוצג פעם אחת — שמרו אותו עכשיו בסביבה של המקור.",
+    keyPrefix: (p) => `מפתח ${p}…`,
+    subscribers: (n) => `${n} מקושרים`,
+    disabled: "מושבת",
+    deleteSource: "מחיקת המקור",
+    deleteSourceConfirm: (name) => `למחוק את ${name} ואת כל הקישורים אליו? אי אפשר לבטל.`,
+    preview: "תצוגה מקדימה של התראה",
+    previewBody: "תמלול לדוגמה: כך ייראה הטקסט בהתראה.",
+
+    offline: "אין חיבור — מוצג מה שיש במכשיר.",
+    error: (msg) => `משהו השתבש: ${msg}`,
+  },
+};
+
+export const LOCALES = ["en", "he"];
+
+let current = "en";
+
+export function detectLocale(preferred) {
+  if (LOCALES.includes(preferred)) return preferred;
+  try {
+    const saved = localStorage.getItem("locale");
+    if (LOCALES.includes(saved)) return saved;
+  } catch {}
+  return (navigator.languages ?? [navigator.language]).some((l) => /^(he|iw)\b/i.test(l)) ? "he" : "en";
+}
+
+export function setLocale(locale) {
+  current = LOCALES.includes(locale) ? locale : "en";
+  try {
+    localStorage.setItem("locale", current);
+  } catch {}
+  document.documentElement.lang = current;
+  document.documentElement.dir = current === "he" ? "rtl" : "ltr";
+  for (const node of document.querySelectorAll("[data-i18n]")) {
+    node.textContent = t(node.dataset.i18n);
+  }
+  for (const node of document.querySelectorAll("[data-i18n-placeholder]")) {
+    node.placeholder = t(node.dataset.i18nPlaceholder);
+  }
+  for (const node of document.querySelectorAll("[data-i18n-label]")) {
+    node.setAttribute("aria-label", t(node.dataset.i18nLabel));
+  }
+}
+
+export function locale() {
+  return current;
+}
+
+export function t(key, ...args) {
+  const value = STRINGS[current][key] ?? STRINGS.en[key] ?? key;
+  return typeof value === "function" ? value(...args) : value;
+}
+
+// A source's own name and description, in the UI language when it has one.
+export function localized(source, field) {
+  return (current === "he" && source?.[`${field}_he`]) || source?.[field] || "";
+}
