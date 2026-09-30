@@ -162,7 +162,7 @@ export function notifyRoutes(pool) {
             createdAt: new Date(at),
             id: ulid(at),
             userSub: req.user.sub,
-            source: "Notifier",
+            source: "Communicator",
             kind: "test",
             ...TEST_MESSAGE[req.user.locale === "he" ? "he" : "en"],
           })
