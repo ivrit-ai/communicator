@@ -8,6 +8,7 @@ import {
   freshDatabase,
   startApp,
   startPushService,
+  stopDatabase,
   waitFor,
 } from "./harness.js";
 import { adoptAnonymous } from "../src/accounts.js";
@@ -46,6 +47,7 @@ after(async () => {
   await app?.stop();
   await push?.close();
   await pool?.end();
+  stopDatabase();
 });
 
 async function createSource(source = ELIEZER) {

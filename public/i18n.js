@@ -3,6 +3,7 @@
 const STRINGS = {
   en: {
     brand: "Communicator",
+    support: "Support",
     landingKicker: "Hailing frequencies open",
     landingTitle: "Every message from the services you use, in one quiet inbox.",
     landingLede:
@@ -246,6 +247,7 @@ const STRINGS = {
 
   he: {
     brand: "Communicator",
+    support: "תמיכה",
     landingKicker: "ערוצי התקשורת פתוחים",
     landingTitle: "כל ההודעות מהשירותים שלכם, בתיבה אחת שקטה.",
     landingLede:

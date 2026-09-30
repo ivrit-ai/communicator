@@ -1,7 +1,7 @@
 // Shared scaffolding for the integration tests: a scratch database, the real
 // server as a child process, and a local HTTPS push service that records (and
 // can decrypt) what the sender delivers.
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { createECDH, createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import https from "node:https";
@@ -16,11 +16,42 @@ const require = createRequire(import.meta.url);
 const ece = require("http_ece");
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const BASE_URL = process.env.TEST_DATABASE_URL ?? "postgresql://postgres:dev@127.0.0.1:55439/notifier_test";
+// TEST_DATABASE_URL points at a server you run yourself; without it, each run
+// starts a throwaway Postgres in Docker and removes it at the end.
+let BASE_URL = process.env.TEST_DATABASE_URL;
+let container = null;
 
 export const ADMIN_EMAIL = "admin@example.com";
 
+async function startPostgres() {
+  const port = 20000 + Math.floor(Math.random() * 20000);
+  container = `notifier-test-pg-${process.pid}`;
+  execFileSync("docker", [
+    "run", "-d", "--rm", "--name", container, "-e", "POSTGRES_PASSWORD=dev",
+    "-p", `127.0.0.1:${port}:5432`, "postgres:16-alpine",
+  ], { stdio: "ignore" });
+  // The image starts Postgres once to initialise, stops it, and starts it for
+  // real: ready is the second time it says so.
+  const started = Date.now();
+  const logs = () => {
+    // Postgres logs to stderr, which docker logs passes through as stderr.
+    const out = spawnSync("docker", ["logs", container], { encoding: "utf8" });
+    return `${out.stdout}${out.stderr}`;
+  };
+  while (logs().split("ready to accept connections").length < 3) {
+    if (Date.now() - started > 60_000) throw new Error("test Postgres did not start");
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return `postgresql://postgres:dev@127.0.0.1:${port}/notifier_test`;
+}
+
+export function stopDatabase() {
+  if (container) execFileSync("docker", ["rm", "-f", container], { stdio: "ignore" });
+  container = null;
+}
+
 export async function freshDatabase() {
+  BASE_URL ??= await startPostgres();
   const url = new URL(BASE_URL);
   const name = url.pathname.slice(1);
   const admin = new pg.Client({ connectionString: Object.assign(new URL(BASE_URL), { pathname: "/postgres" }).href });
