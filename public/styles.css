@@ -465,6 +465,10 @@ main {
   padding: 28px 0 24px;
 }
 
+.landing > * {
+  min-width: 0;
+}
+
 @media (min-width: 900px) {
   main:has(> .landing:not([hidden])) {
     max-width: 1080px;
@@ -536,16 +540,38 @@ main {
   gap: 8px;
 }
 
-.cta .btn.primary {
-  min-width: min(100%, 320px);
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 560px;
+}
+
+.btn.choice {
+  min-height: 56px;
+  padding: 8px 20px;
+  white-space: normal;
+  text-align: center;
+  font-size: 16px;
+  background: var(--card);
+  border-color: var(--line);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn.choice:hover {
+  border-color: var(--ink-2);
+}
+
+.btn.choice .i {
+  width: 22px;
+  height: 22px;
+  color: var(--ink-2);
 }
 
 .cta .g {
   width: 22px;
   height: 22px;
-  padding: 2px;
-  border-radius: 999px;
-  background: #fff;
 }
 
 .fine {
