@@ -205,33 +205,174 @@ async function reconcile() {
   if (!pushSupported() || Notification.permission !== "granted") return;
   const last = Number(localStorage.getItem("reconciled_at") ?? 0);
   if (Date.now() - last < RECONCILE_INTERVAL_MS) return;
-  await registerThisDevice().catch(() => {});
+  try {
+    await registerThisDevice();
+    state.pushFailed = false;
+  } catch {
+    state.pushFailed = true;
+  }
+  renderNotifyBanner();
 }
 
-// Soft prompt, then the real one. Resolves true once this device is registered.
+// Soft prompt, then the real one. Resolves to what happened: "granted" once
+// this device is registered, "dismissed" when the user said not now, or the
+// trouble that stopped it (see notificationTrouble).
 async function enableNotifications() {
-  if (!pushSupported()) return false;
+  if (!pushSupported()) return troubleWithoutPush();
+  if (Notification.permission === "denied") return "denied";
   if (Notification.permission !== "granted") {
     const dialog = $("preprompt");
     dialog.showModal();
     await new Promise((resolve) => dialog.addEventListener("close", resolve, { once: true }));
-    if (dialog.returnValue !== "yes") return false;
+    if (dialog.returnValue !== "yes") return "dismissed";
     // Safari ignores requestPermission outside a user gesture, and a denial is
     // permanent, so this only ever runs from a deliberate click.
     const permission = await Notification.requestPermission();
-    if (permission !== "granted") {
-      renderPermission();
-      return false;
-    }
+    // Still "default" means the browser answered for the user without asking:
+    // Chrome's quiet prompt, or a request dismissed too often before.
+    if (permission !== "granted") return permission === "denied" ? "denied" : "hidden";
   }
   try {
     await registerThisDevice();
+    state.pushFailed = false;
     toast(t("registered"));
-    return true;
-  } catch (err) {
-    toast(t("error", err.message));
-    return false;
+    return "granted";
+  } catch {
+    // Allowed, yet the browser could not subscribe: Brave with Google push
+    // messaging off, some private windows, a push service that is down.
+    state.pushFailed = true;
+    return "failed";
   }
+}
+
+// ---------------------------------------------------------------- notification trouble
+
+function platform() {
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const os = ios ? "ios" : /Android/.test(ua) ? "android" : /Mac OS X/.test(ua) ? "mac" : "desktop";
+  const browser = navigator.brave
+    ? "brave"
+    : /SamsungBrowser/.test(ua)
+      ? "samsung"
+      : /Edg\//.test(ua)
+        ? "edge"
+        : /Firefox\/|FxiOS/.test(ua)
+          ? "firefox"
+          : /Chrome\/|CriOS/.test(ua)
+            ? "chrome"
+            : /Safari\//.test(ua)
+              ? "safari"
+              : "other";
+  return { os, browser };
+}
+
+function troubleWithoutPush() {
+  return platform().os === "ios" && !installed() ? "ios-install" : "unsupported";
+}
+
+// Why notifications cannot reach this device, or null when nothing is known to
+// be wrong. "default" (never asked) is not trouble: it is a question to ask.
+function notificationTrouble() {
+  if (!pushSupported()) return troubleWithoutPush();
+  if (Notification.permission === "denied") return "denied";
+  if (Notification.permission === "granted" && state.pushFailed) return "failed";
+  return null;
+}
+
+function helpSteps(trouble) {
+  const { os, browser } = platform();
+  const host = location.host;
+  if (trouble === "ios-install") return t("helpIos-install");
+  if (trouble === "hidden") return t("helpHidden");
+  if (trouble === "failed") return browser === "brave" ? t("helpBrave") : t("helpFailed");
+  if (trouble === "unsupported") return t("helpFailed");
+  if (os === "ios") return t("helpIos");
+  if (os === "android") return browser === "samsung" ? t("helpSamsung", host) : t("helpAndroid", host);
+  if (browser === "firefox") return t("helpFirefox", host);
+  if (browser === "safari") return t("helpSafari", host);
+  if (["chrome", "edge", "brave"].includes(browser)) return t("helpChromium", host);
+  return t("helpGeneric");
+}
+
+// Steps for this browser and device, and what to do once they are done.
+function helpPanel(trouble, { retry, skip } = {}) {
+  const actions = [];
+  if (retry && trouble !== "unsupported" && trouble !== "ios-install") {
+    actions.push(el("button", { class: "btn primary", type: "button", text: t("helpRetry"), onclick: retry }));
+  }
+  if (skip) actions.push(el("button", { class: "btn quiet", type: "button", text: t("linkAnyway"), onclick: skip }));
+  return el("div", { class: "help" }, [
+    el("h3", { text: t(`helpTitle_${trouble}`) }),
+    el("p", { class: "muted", text: t("helpLead") }),
+    el("ol", {}, helpSteps(trouble).map((step) => el("li", { text: step }))),
+    trouble === "denied" || trouble === "hidden" ? el("p", { class: "hint", text: t("helpSystem") }) : null,
+    actions.length ? el("div", { class: "row" }, actions) : null,
+  ]);
+}
+
+// "I've allowed them": look again, and carry on if they were.
+async function recheckNotifications() {
+  if (pushSupported() && Notification.permission === "default") return enableNotifications();
+  const trouble = notificationTrouble();
+  if (trouble === "denied") {
+    toast(t("stillBlocked"));
+    return trouble;
+  }
+  return enableNotifications();
+}
+
+// Permission changes (the user fixing it in site settings) re-render whatever
+// is showing, where the browser reports them.
+navigator.permissions
+  ?.query({ name: "notifications" })
+  .then((status) => {
+    status.onchange = () => {
+      if (!state.me) return;
+      renderNotifyBanner();
+      if (state.view === "settings") renderPermission();
+    };
+  })
+  .catch(() => {});
+
+function renderNotifyBanner() {
+  const box = $("notify-banner");
+  const trouble = notificationTrouble();
+  const ask = !trouble && pushSupported() && Notification.permission === "default";
+  let dismissed = 0;
+  try {
+    dismissed = Number(localStorage.getItem("notify_banner_dismissed") ?? 0);
+  } catch {}
+  if ((!trouble && !ask) || Date.now() - dismissed < 7 * DAY_MS) {
+    box.hidden = true;
+    return;
+  }
+  box.replaceChildren(
+    icon("bell"),
+    el("span", { class: "grow", text: ask ? t("bannerAsk") : t("bannerOff") }),
+    el("button", {
+      class: "btn small primary",
+      type: "button",
+      text: ask ? t("bannerTurnOn") : t("bannerFix"),
+      onclick: async () => {
+        if (!ask) return showView("settings");
+        await enableNotifications();
+        renderNotifyBanner();
+      },
+    }),
+    el("button", {
+      class: "icon-btn",
+      type: "button",
+      "aria-label": t("dismiss"),
+      onclick: () => {
+        try {
+          localStorage.setItem("notify_banner_dismissed", String(Date.now()));
+        } catch {}
+        box.hidden = true;
+      },
+    }, [icon("close")])
+  );
+  box.hidden = false;
 }
 
 // ---------------------------------------------------------------- sync
@@ -569,14 +710,22 @@ function clearSheetTimers() {
   sheetTimers = [];
 }
 
-function openLinkSheet(source) {
+async function openLinkSheet(source) {
   const dialog = $("sheet");
   const name = localized(source, "name");
   $("sheet-title").textContent = t("sheetTitle", name);
   $("sheet-avatar").replaceChildren(avatar({ icon: source.icon, name }));
   dialog.showModal();
-  if (pushSupported() && Notification.permission === "default") renderNotifyStep(source);
-  else mintCode(source);
+  const trouble = notificationTrouble();
+  if (trouble) return renderHelpStep(source, trouble);
+  if (pushSupported() && Notification.permission === "default") return renderNotifyStep(source);
+  // Allowed, but this device may never have subscribed (or lost it): make
+  // sure before the user links, since a link with no device reaches no one.
+  if (pushSupported() && !localStorage.getItem("device_id")) {
+    const result = await enableNotifications();
+    if (result !== "granted") return renderHelpStep(source, result);
+  }
+  mintCode(source);
 }
 
 function closeSheet() {
@@ -592,12 +741,28 @@ function renderNotifyStep(source) {
         class: "btn primary",
         type: "button",
         onclick: async () => {
-          await enableNotifications();
-          mintCode(source);
+          const result = await enableNotifications();
+          if (result === "granted" || result === "dismissed") mintCode(source);
+          else renderHelpStep(source, result);
         },
       }, [icon("bell"), el("span", { text: t("enableHere") })]),
       el("button", { class: "btn quiet", type: "button", text: t("notNow"), onclick: () => mintCode(source) }),
     ])
+  );
+}
+
+// Linking still works without notifications (messages wait in the app), so
+// the user can always go on; but they should know why nothing will pop up.
+function renderHelpStep(source, trouble) {
+  $("sheet-body").replaceChildren(
+    helpPanel(trouble, {
+      retry: async () => {
+        const result = await recheckNotifications();
+        if (result === "granted") mintCode(source);
+        else if (result !== "denied") renderHelpStep(source, result === "dismissed" ? trouble : result);
+      },
+      skip: () => mintCode(source),
+    })
   );
 }
 
@@ -821,10 +986,24 @@ async function changeLocale(next) {
 
 function renderPermission() {
   const permission = pushSupported() ? Notification.permission : "unsupported";
+  const trouble = notificationTrouble();
   const copy = { unsupported: "permUnsupported", default: "permDefault", granted: "permGranted", denied: "permDenied" };
   $("permission").textContent = t(copy[permission]);
+  $("permission").hidden = Boolean(trouble);
+  $("permission-help").replaceChildren(
+    trouble
+      ? helpPanel(trouble, {
+          retry: async () => {
+            await recheckNotifications();
+            renderPermission();
+            renderNotifyBanner();
+            renderDevices().catch(() => {});
+          },
+        })
+      : ""
+  );
   $("enable").hidden = permission !== "default";
-  $("test").hidden = permission !== "granted";
+  $("test").hidden = permission !== "granted" || Boolean(trouble);
 }
 
 async function renderDevices() {
@@ -1169,6 +1348,7 @@ $("new-token").addEventListener("submit", async (event) => {
 $("enable").addEventListener("click", async () => {
   await enableNotifications();
   renderPermission();
+  renderNotifyBanner();
   renderDevices().catch(() => {});
   renderDiagnostics();
 });
@@ -1326,6 +1506,7 @@ async function start() {
   state.catalog = (await store.getMeta("catalog")) ?? state.catalog;
   await loadMessages();
   showView("inbox");
+  renderNotifyBanner();
 
   if (location.hash === "#upgraded") {
     history.replaceState(null, "", location.pathname);
