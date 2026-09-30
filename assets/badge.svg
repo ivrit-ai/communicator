@@ -1,10 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <mask id="m">
     <rect width="512" height="512" fill="#fff"/>
-    <rect x="132" y="236" width="164" height="30" rx="15" fill="#000"/>
-    <rect x="132" y="296" width="108" height="30" rx="15" fill="#000"/>
-    <circle cx="398" cy="170" r="84" fill="#000"/>
+    <path d="M256 96 C306 192 338 296 366 402 C326 380 294 370 256 370 C218 370 186 380 146 402 C174 296 206 192 256 96 Z"
+          fill="#000" stroke="#000" stroke-width="44" stroke-linejoin="round"/>
   </mask>
-  <rect x="72" y="166" width="336" height="236" rx="54" fill="#fff" mask="url(#m)"/>
-  <circle cx="398" cy="170" r="58" fill="#fff"/>
+  <ellipse cx="256" cy="276" rx="206" ry="118" fill="#fff" mask="url(#m)"/>
+  <path d="M256 96 C306 192 338 296 366 402 C326 380 294 370 256 370 C218 370 186 380 146 402 C174 296 206 192 256 96 Z" fill="#fff"/>
 </svg>

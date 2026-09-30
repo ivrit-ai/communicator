@@ -1,7 +1,7 @@
 importScripts("/store.js");
 
 const store = self.NotifierStore;
-const SHELL = "shell-v3";
+const SHELL = "shell-v4";
 const SHELL_FILES = [
   "/",
   "/app.js",
@@ -26,8 +26,8 @@ const SHELL_FILES = [
 
 // The few strings the worker itself shows, when no window is open to ask.
 const STRINGS = {
-  en: { new: (n) => `${n} new messages`, open: "Open Notifier to read them." },
-  he: { new: (n) => `${n} הודעות חדשות`, open: "פתחו את Notifier כדי לקרוא." },
+  en: { new: (n) => `${n} new messages`, open: "Open Communicator to read them." },
+  he: { new: (n) => `${n} הודעות חדשות`, open: "פתחו את Communicator כדי לקרוא." },
 };
 
 // Take over immediately rather than waiting for every tab to close. A stale
@@ -85,7 +85,7 @@ async function context() {
 
 function displayName(data, ctx) {
   const source = ctx.sources.find((s) => s.id === data.sid);
-  return (ctx.locale === "he" && source?.name_he) || source?.name || data.s || "Notifier";
+  return (ctx.locale === "he" && source?.name_he) || source?.name || data.s || "Communicator";
 }
 
 self.addEventListener("push", (event) => {

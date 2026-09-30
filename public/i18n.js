@@ -2,8 +2,8 @@
 // number or a name in it, so word order is the translation's business.
 const STRINGS = {
   en: {
-    brand: "Notifier",
-    landingKicker: "Your services, delivered",
+    brand: "Communicator",
+    landingKicker: "Hailing frequencies open",
     landingTitle: "Every message from the services you use, in one quiet inbox.",
     landingLede:
       "Link Eliezer or your own scripts once. Their messages arrive as notifications on every device you choose, and stay on those devices.",
@@ -15,8 +15,8 @@ const STRINGS = {
     anonCaveat: "Without an account, your inbox lives only in this browser.",
     iosHintTitle: "Install first, then sign in.",
     iosHintBody:
-      "Tap Share → Add to Home Screen, open Notifier from your Home Screen, and continue there. iOS only delivers notifications to the installed app.",
-    installTitle: "Install Notifier",
+      "Tap Share → Add to Home Screen, open Communicator from your Home Screen, and continue there. iOS only delivers notifications to the installed app.",
+    installTitle: "Install Communicator",
     installBody: "Opens like an app, and notifications keep arriving when the browser is closed.",
     install: "Install",
     installLater: "You can install later from the browser menu.",
@@ -95,7 +95,7 @@ const STRINGS = {
     signedInAs: (email) => `Signed in as ${email}`,
     anonymousTitle: "No account",
     anonymousBody:
-      "Your inbox and links live only in this browser. Sign in with Google to keep them safe and to use Notifier on more than one device — everything you have now comes along.",
+      "Your inbox and links live only in this browser. Sign in with Google to keep them safe and to use Communicator on more than one device — everything you have now comes along.",
     upgrade: "Sign in with Google",
     upgraded: "Your inbox is now tied to your Google account.",
     signOut: "Sign out",
@@ -181,8 +181,8 @@ const STRINGS = {
   },
 
   he: {
-    brand: "Notifier",
-    landingKicker: "השירותים שלכם, כהתראות",
+    brand: "Communicator",
+    landingKicker: "ערוצי התקשורת פתוחים",
     landingTitle: "כל ההודעות מהשירותים שלכם, בתיבה אחת שקטה.",
     landingLede:
       "מקשרים פעם אחת את אליעזר או סקריפטים משלכם. ההודעות מגיעות כהתראות לכל מכשיר שתבחרו, ונשמרות בו.",
@@ -194,8 +194,8 @@ const STRINGS = {
     anonCaveat: "בלי חשבון, התיבה שלכם קיימת רק בדפדפן הזה.",
     iosHintTitle: "קודם מתקינים, אחר כך נכנסים.",
     iosHintBody:
-      "הקישו שיתוף ← הוספה למסך הבית, פתחו את Notifier ממסך הבית והמשיכו משם. ב-iOS התראות מגיעות רק לאפליקציה המותקנת.",
-    installTitle: "התקנת Notifier",
+      "הקישו שיתוף ← הוספה למסך הבית, פתחו את Communicator ממסך הבית והמשיכו משם. ב-iOS התראות מגיעות רק לאפליקציה המותקנת.",
+    installTitle: "התקנת Communicator",
     installBody: "נפתח כמו אפליקציה, וההתראות ממשיכות להגיע גם כשהדפדפן סגור.",
     install: "התקנה",
     installLater: "אפשר להתקין מאוחר יותר מתפריט הדפדפן.",
@@ -274,7 +274,7 @@ const STRINGS = {
     signedInAs: (email) => `מחוברים בתור ${email}`,
     anonymousTitle: "ללא חשבון",
     anonymousBody:
-      "התיבה והקישורים שלכם קיימים רק בדפדפן הזה. התחברו עם Google כדי לשמור עליהם ולהשתמש ב-Notifier ביותר ממכשיר אחד — כל מה שיש לכם עכשיו יעבור איתכם.",
+      "התיבה והקישורים שלכם קיימים רק בדפדפן הזה. התחברו עם Google כדי לשמור עליהם ולהשתמש ב-Communicator ביותר ממכשיר אחד — כל מה שיש לכם עכשיו יעבור איתכם.",
     upgrade: "התחברות עם Google",
     upgraded: "התיבה שלכם מחוברת עכשיו לחשבון Google.",
     signOut: "התנתקות",

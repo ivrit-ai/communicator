@@ -1,10 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="116" fill="#D9481C"/>
-  <g transform="rotate(-7 256 230)">
-    <rect x="148" y="118" width="236" height="160" rx="38" fill="#F6F1E7" opacity=".42"/>
-  </g>
-  <rect x="112" y="186" width="288" height="196" rx="44" fill="#F6F1E7"/>
-  <rect x="152" y="246" width="164" height="24" rx="12" fill="#1C1B17"/>
-  <rect x="152" y="296" width="108" height="24" rx="12" fill="#1C1B17" opacity=".32"/>
-  <circle cx="388" cy="190" r="50" fill="#1C1B17" stroke="#D9481C" stroke-width="20"/>
+  <rect width="512" height="512" rx="116" fill="#1C1B17"/>
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F0CD74"/>
+      <stop offset="1" stop-color="#B7852C"/>
+    </linearGradient>
+    <linearGradient id="silver" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FBF8F1"/>
+      <stop offset="1" stop-color="#C8C1B2"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="256" cy="276" rx="176" ry="100" fill="url(#gold)"/>
+  <ellipse cx="256" cy="276" rx="176" ry="100" fill="none" stroke="#1C1B17" stroke-opacity=".18" stroke-width="6"/>
+  <path d="M256 96 C306 192 338 296 366 402 C326 380 294 370 256 370 C218 370 186 380 146 402 C174 296 206 192 256 96 Z"
+        fill="url(#silver)" stroke="#1C1B17" stroke-width="12" stroke-linejoin="round"/>
 </svg>

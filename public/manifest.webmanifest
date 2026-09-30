@@ -1,6 +1,6 @@
 {
-  "name": "Notifier",
-  "short_name": "Notifier",
+  "name": "Communicator",
+  "short_name": "Communicator",
   "description": "Messages from the services you use, as notifications on your devices.",
   "id": "/",
   "start_url": "/",
