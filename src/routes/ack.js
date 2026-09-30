@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { decodeTime } from "ulid";
 import { verifyAck } from "../ack.js";
+import { NOTIFICATION_COLUMNS } from "./notifications.js";
 
 // The ULID's first 48 bits are the creation time, and the notification was
 // written with exactly that instant as created_at. So the partition is
@@ -44,9 +45,19 @@ export function ackRoutes(pool) {
             AND acked_at IS NULL`,
         [createdAt, id, deviceId]
       );
+      // The push carried at most a preview. The signed ack proves this device
+      // was sent this notification, which is exactly the right to read it in
+      // full, with no session: the app may not have been opened in days.
+      const { rows } = await pool.query(
+        `SELECT ${NOTIFICATION_COLUMNS}
+           FROM notifications n
+           JOIN deliveries d ON d.created_at = n.created_at AND d.notification_id = n.id
+          WHERE n.created_at = $1 AND n.id = $2 AND d.device_id = $3`,
+        [createdAt, id, deviceId]
+      );
       // Re-acking is not an error: the service worker may fire twice, and the
       // client must never be pushed into a retry loop by a 4xx here.
-      res.json({ ok: true, first: rowCount > 0 });
+      res.json({ ok: true, first: rowCount > 0, notification: rows[0] ?? null });
     } catch (err) {
       next(err);
     }

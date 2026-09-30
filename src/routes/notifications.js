@@ -8,6 +8,10 @@ const MAX_LIMIT = 100;
 const MAX_READ_IDS = 200;
 const WINDOW = `${RETENTION_DAYS} days`;
 
+// What a device stores. Qualified, because the ack route joins deliveries.
+export const NOTIFICATION_COLUMNS = `n.id, n.created_at, n.source, n.source_id, n.title, n.subtitle,
+  n.body, n.url, n.kind, n.lang, n.read_at`;
+
 function partitionKey(id) {
   try {
     return new Date(decodeTime(id));
@@ -20,25 +24,38 @@ export function notificationRoutes(pool) {
   const router = Router();
   router.use("/api/notifications", requireSession(pool));
 
+  // Newest first with ?before= (paging back through history), or oldest first
+  // with ?after= (a device catching up from the last message it has).
   router.get("/api/notifications", async (req, res, next) => {
     const limit = Math.min(Number(req.query.limit) || DEFAULT_LIMIT, MAX_LIMIT);
     const before = typeof req.query.before === "string" ? req.query.before : null;
-    const cursor = before ? partitionKey(before) : null;
-    if (before && !cursor) return res.status(400).json({ error: "bad_cursor" });
+    const after = typeof req.query.after === "string" ? req.query.after : null;
+    if (before && after) return res.status(400).json({ error: "before_or_after" });
+    const cursorId = before ?? after;
+    const cursor = cursorId ? partitionKey(cursorId) : null;
+    if (cursorId && !cursor) return res.status(400).json({ error: "bad_cursor" });
 
     try {
       // Keyset, not OFFSET: the ULID doubles as the cursor, and the lower bound
       // on created_at lets Postgres skip the partitions that cannot contain
       // anything rather than opening one index per retained day.
       const { rows } = await pool.query(
-        `SELECT id, created_at, source, title, body, url, read_at
-           FROM notifications
-          WHERE user_sub = $1
-            AND created_at > now() - $2::interval
-            AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4))
-          ORDER BY created_at DESC, id DESC
-          LIMIT $5`,
-        [req.user.sub, WINDOW, cursor, before, limit]
+        after
+          ? `SELECT ${NOTIFICATION_COLUMNS}
+               FROM notifications n
+              WHERE n.user_sub = $1
+                AND n.created_at > now() - $2::interval
+                AND (n.created_at, n.id) > ($3, $4)
+              ORDER BY n.created_at, n.id
+              LIMIT $5`
+          : `SELECT ${NOTIFICATION_COLUMNS}
+               FROM notifications n
+              WHERE n.user_sub = $1
+                AND n.created_at > now() - $2::interval
+                AND ($3::timestamptz IS NULL OR (n.created_at, n.id) < ($3, $4))
+              ORDER BY n.created_at DESC, n.id DESC
+              LIMIT $5`,
+        [req.user.sub, WINDOW, cursor, cursorId, limit]
       );
       res.json({
         notifications: rows,
@@ -54,9 +71,9 @@ export function notificationRoutes(pool) {
     if (!createdAt) return res.status(404).json({ error: "not_found" });
     try {
       const { rows } = await pool.query(
-        `SELECT id, created_at, source, title, body, url, read_at
-           FROM notifications
-          WHERE created_at = $1 AND id = $2 AND user_sub = $3`,
+        `SELECT ${NOTIFICATION_COLUMNS}
+           FROM notifications n
+          WHERE n.created_at = $1 AND n.id = $2 AND n.user_sub = $3`,
         [createdAt, req.params.id, req.user.sub]
       );
       // user_sub is part of the predicate, not checked afterwards: this is the

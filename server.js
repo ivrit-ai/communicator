@@ -10,6 +10,9 @@ import { deviceRoutes } from "./src/routes/devices.js";
 import { notifyRoutes } from "./src/routes/notify.js";
 import { ackRoutes } from "./src/routes/ack.js";
 import { notificationRoutes } from "./src/routes/notifications.js";
+import { linkRoutes } from "./src/routes/links.js";
+import { sourceApiRoutes } from "./src/routes/source-api.js";
+import { adminRoutes } from "./src/routes/admin.js";
 import { superviseSender } from "./src/supervise.js";
 import { startMaintenance } from "./src/maintenance.js";
 
@@ -80,8 +83,15 @@ app.get("/api/config", (req, res) => {
   res.json({ vapidPublicKey: VAPID_PUBLIC_KEY });
 });
 
+// Before the general parser, which then leaves these bodies alone: sources send
+// whole transcripts, and admins upload a rasterised logo.
+app.use("/api/source", express.json({ limit: "128kb" }));
+app.use("/api/admin", express.raw({ type: "image/png", limit: "256kb" }));
 app.use(express.json({ limit: "16kb" }));
 app.use(authRoutes(pool));
+app.use(sourceApiRoutes(pool));
+app.use(linkRoutes(pool));
+app.use(adminRoutes(pool));
 app.use(tokenRoutes(pool));
 app.use(deviceRoutes(pool));
 app.use(notifyRoutes(pool));

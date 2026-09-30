@@ -1,17 +1,13 @@
 import https from "node:https";
 import webpush from "web-push";
 import { createPool } from "./db.js";
-import { signAck } from "./ack.js";
+import { buildPayload } from "./payload.js";
 
 const CONCURRENCY = Number(process.env.SENDER_CONCURRENCY ?? 32);
 const LEASE = "60 seconds";
 const IDLE_POLL_MS = 1000;
 const MAX_ATTEMPTS = 6;
-const TTL_SECONDS = 604800; // 7 days, matching history retention
-
-// Push services reject anything over ~4KB of ciphertext. Trimming here turns a
-// wasted round trip plus a 413 into a notification that simply arrives.
-const MAX_PAYLOAD_BYTES = 3800;
+const TTL_SECONDS = 259200; // 3 days, matching server-side retention
 
 // One socket pool for all sends. Without keep-alive every notification pays a
 // fresh TLS handshake to the same handful of hosts.
@@ -88,7 +84,7 @@ async function claim(limit) {
        RETURNING d.created_at, d.notification_id, d.device_id, d.attempts, d.last_status
      )
      SELECT l.created_at, l.notification_id, l.device_id, l.attempts, l.last_status,
-            n.source, n.title, n.body, n.url,
+            n.source, n.title, n.body, n.url, n.source_id, n.subtitle, n.lang,
             dev.endpoint, dev.p256dh, dev.auth
        FROM leased l
        JOIN notifications n
@@ -136,37 +132,6 @@ async function retryLater(row, status, error, delayMs) {
       WHERE created_at = $1 AND notification_id = $2 AND device_id = $3`,
     [...keyOf(row), backoff / 1000, status ?? null, error?.slice(0, 500) ?? null]
   );
-}
-
-// --- payload ---------------------------------------------------------------
-// Single-character keys: the envelope would otherwise burn ~60 bytes of a
-// genuinely tight budget. Full content travels inside the encrypted push rather
-// than a tickle-and-fetch, because a fetch from the service worker would carry
-// a possibly-expired cookie and degrade to a useless placeholder.
-function buildPayload(row, { stub = false } = {}) {
-  const payload = {
-    i: row.notification_id,
-    d: String(row.device_id),
-    k: signAck(row.notification_id, row.device_id),
-    s: row.source,
-    t: row.title,
-    ts: new Date(row.created_at).getTime(),
-  };
-  if (!stub) {
-    if (row.body) payload.b = row.body;
-    if (row.url) payload.u = row.url;
-  }
-
-  let encoded = JSON.stringify(payload);
-  if (!stub && Buffer.byteLength(encoded) > MAX_PAYLOAD_BYTES) {
-    const over = Buffer.byteLength(encoded) - MAX_PAYLOAD_BYTES;
-    payload.b = Buffer.from(payload.b ?? "")
-      .subarray(0, Math.max(0, Buffer.byteLength(payload.b ?? "") - over - 3))
-      .toString()
-      .concat("…");
-    encoded = JSON.stringify(payload);
-  }
-  return encoded;
 }
 
 async function deleteDevice(deviceId) {

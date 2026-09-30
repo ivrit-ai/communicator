@@ -55,7 +55,7 @@ async function lookup(pool, token) {
   // queries on every authenticated request.
   const { rows } = await pool.query(
     `WITH found AS (
-       SELECT s.token_hash, s.last_seen_at, u.sub, u.email, u.name
+       SELECT s.token_hash, s.last_seen_at, u.sub, u.email, u.name, u.kind, u.locale
          FROM sessions s
          JOIN users u ON u.sub = s.user_sub
         WHERE s.token_hash = $1 AND s.expires_at > now()
@@ -67,10 +67,17 @@ async function lookup(pool, token) {
                  WHERE last_seen_at < now() - $3::interval
               )
      )
-     SELECT sub, email, name FROM found`,
+     SELECT sub, email, name, kind, locale FROM found`,
     [hashToken(token), `${TTL_DAYS} days`, SLIDE_AFTER]
   );
   return rows[0] ?? null;
+}
+
+// The signed-in user if there is one, else null. For routes that behave
+// differently for a returning visitor but must also serve a new one.
+export async function currentUser(pool, req) {
+  const token = readCookie(req, SESSION_COOKIE);
+  return token ? lookup(pool, token) : null;
 }
 
 export function requireSession(pool) {
@@ -106,5 +113,26 @@ export function requireSameOrigin(req, res, next) {
   if (originHost !== trustedHost(req)) {
     return res.status(403).json({ error: "bad_origin" });
   }
+  next();
+}
+
+// Read lazily-tolerant, like EXPECTED_HOSTS: an unset list simply means nobody
+// is an admin.
+const ADMIN_EMAILS = new Set(
+  (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+// Only a Google account can be an admin: the email on an anonymous account is
+// null, and nothing else vouches for who is holding the cookie.
+export function isAdmin(user) {
+  return Boolean(user?.kind === "google" && user.email && ADMIN_EMAILS.has(user.email.toLowerCase()));
+}
+
+// Mounted after requireSession.
+export function requireAdmin(req, res, next) {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: "forbidden" });
   next();
 }

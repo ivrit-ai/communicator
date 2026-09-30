@@ -11,39 +11,82 @@ import { rateLimitIngest } from "../rate-limit.js";
 const LIMITS = { title: 300, body: 2000, url: 512, dedupe_key: 200 };
 
 // Long enough to absorb a retry storm or a redeploy gap, deliberately much
-// shorter than the 7-day history: a sender retrying a day later means a new
+// shorter than the history window: a sender retrying a day later means a new
 // event, not a duplicate.
 const DEDUPE_WINDOW = "24 hours";
 
-function checkField(name, value, { required = false } = {}) {
+export function checkField(name, value, { required = false, limits = LIMITS } = {}) {
   if (value === undefined || value === null || value === "") {
     return required ? { error: `${name}_required` } : { value: null };
   }
   if (typeof value !== "string") return { error: `${name}_must_be_a_string` };
   const bytes = Buffer.byteLength(value);
-  if (bytes > LIMITS[name]) {
-    return { error: `${name}_too_long`, bytes, limit: LIMITS[name] };
+  if (bytes > limits[name]) {
+    return { error: `${name}_too_long`, bytes, limit: limits[name] };
   }
   return { value };
 }
 
 // Commit first, deliver second: the notification and its fanout land in one
 // statement, so a container restart cannot lose an accepted send.
-async function insertAndFanOut(client, { createdAt, id, userSub, source, title, body, url }) {
+export async function insertAndFanOut(client, n) {
   const fanout = await client.query(
     `WITH n AS (
-       INSERT INTO notifications (created_at, id, user_sub, source, title, body, url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       INSERT INTO notifications
+         (created_at, id, user_sub, source, title, body, url,
+          source_id, subscription_id, subtitle, kind, lang)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING created_at, id
      )
      INSERT INTO deliveries (created_at, notification_id, device_id)
      SELECT n.created_at, n.id, d.id
        FROM n CROSS JOIN devices d
       WHERE d.user_sub = $3`,
-    [createdAt, id, userSub, source, title, body, url]
+    [
+      n.createdAt,
+      n.id,
+      n.userSub,
+      n.source,
+      n.title ?? "",
+      n.body ?? null,
+      n.url ?? null,
+      n.sourceId ?? null,
+      n.subscriptionId ?? null,
+      n.subtitle ?? null,
+      n.kind ?? null,
+      n.lang ?? null,
+    ]
   );
   return fanout.rowCount;
 }
+
+// Claim the key first. A concurrent retry blocks on the unique index until this
+// commits, then sees the conflict — so the duplicate is resolved by Postgres
+// rather than by a check-then-act race. Returns the original id on a duplicate.
+export async function claimDedupe(client, { userSub, key, id, createdAt }) {
+  const claimed = await client.query(
+    `INSERT INTO dedupe (user_sub, dedupe_key, notification_id, notification_created_at, expires_at)
+     VALUES ($1, $2, $3, $4, now() + $5::interval)
+     ON CONFLICT (user_sub, dedupe_key) DO UPDATE
+       SET notification_id = EXCLUDED.notification_id,
+           notification_created_at = EXCLUDED.notification_created_at,
+           expires_at = EXCLUDED.expires_at
+       WHERE dedupe.expires_at < now()
+     RETURNING notification_id`,
+    [userSub, key, id, createdAt, DEDUPE_WINDOW]
+  );
+  if (claimed.rowCount) return null;
+  const { rows } = await client.query(
+    "SELECT notification_id FROM dedupe WHERE user_sub = $1 AND dedupe_key = $2",
+    [userSub, key]
+  );
+  return rows[0].notification_id;
+}
+
+const TEST_MESSAGE = {
+  en: { title: "Test notification", body: "If you can see this, notifications work on this device.", lang: "en" },
+  he: { title: "התראת בדיקה", body: "אם ההודעה הזאת מופיעה, ההתראות עובדות במכשיר הזה.", lang: "he" },
+};
 
 export function notifyRoutes(pool) {
   const router = Router();
@@ -77,27 +120,13 @@ export function notifyRoutes(pool) {
     try {
       const result = await withTx(pool, async (client) => {
         if (fields.dedupe_key) {
-          // Claim the key first. A concurrent retry blocks on the unique index
-          // until this commits, then sees the conflict — so the duplicate is
-          // resolved by Postgres rather than by a check-then-act race.
-          const claimed = await client.query(
-            `INSERT INTO dedupe (user_sub, dedupe_key, notification_id, notification_created_at, expires_at)
-             VALUES ($1, $2, $3, $4, now() + $5::interval)
-             ON CONFLICT (user_sub, dedupe_key) DO UPDATE
-               SET notification_id = EXCLUDED.notification_id,
-                   notification_created_at = EXCLUDED.notification_created_at,
-                   expires_at = EXCLUDED.expires_at
-               WHERE dedupe.expires_at < now()
-             RETURNING notification_id`,
-            [userSub, fields.dedupe_key, id, createdAt, DEDUPE_WINDOW]
-          );
-          if (!claimed.rowCount) {
-            const { rows } = await client.query(
-              "SELECT notification_id FROM dedupe WHERE user_sub = $1 AND dedupe_key = $2",
-              [userSub, fields.dedupe_key]
-            );
-            return { id: rows[0].notification_id, devices: 0, duplicate: true };
-          }
+          const original = await claimDedupe(client, {
+            userSub,
+            key: fields.dedupe_key,
+            id,
+            createdAt,
+          });
+          if (original) return { id: original, devices: 0, duplicate: true };
         }
 
         const devices = await insertAndFanOut(client, {
@@ -105,7 +134,9 @@ export function notifyRoutes(pool) {
           id,
           userSub,
           source,
-          ...fields,
+          title: fields.title,
+          body: fields.body,
+          url: fields.url,
         });
         return { id, devices, duplicate: false };
       });
@@ -131,10 +162,9 @@ export function notifyRoutes(pool) {
             createdAt: new Date(at),
             id: ulid(at),
             userSub: req.user.sub,
-            source: "notifier",
-            title: "Test notification",
-            body: "If you can see this, push is working on this device.",
-            url: null,
+            source: "Notifier",
+            kind: "test",
+            ...TEST_MESSAGE[req.user.locale === "he" ? "he" : "en"],
           })
         );
         res.status(202).json({ devices });

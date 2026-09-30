@@ -4,13 +4,22 @@ import { verifyPlatformIdentity } from "../auth-platform.js";
 import {
   clearSessionCookie,
   createSession,
+  currentUser,
   destroySession,
+  isAdmin,
   requireSameOrigin,
   requireSession,
   setSessionCookie,
 } from "../auth-session.js";
+import { adoptAnonymous, createAnonymousUser, deleteAccount } from "../accounts.js";
+import { LIMITS, consume, rejectRateLimited } from "../rate-limit.js";
 
 const LOGIN = "/xhost-auth/login";
+const LOCALES = new Set(["en", "he"]);
+
+function readLocale(value) {
+  return typeof value === "string" && LOCALES.has(value) ? value : null;
+}
 
 export function authRoutes(pool) {
   const router = Router();
@@ -35,24 +44,68 @@ export function authRoutes(pool) {
     }
 
     try {
+      // Signing in from an anonymous session is an upgrade, not a switch.
+      const before = await currentUser(pool, req);
       const token = await withTx(pool, async (client) => {
         await client.query(
-          `INSERT INTO users (sub, email, name) VALUES ($1, $2, $3)
+          `INSERT INTO users (sub, email, name, kind) VALUES ($1, $2, $3, 'google')
            ON CONFLICT (sub) DO UPDATE
              SET email = EXCLUDED.email, name = EXCLUDED.name, last_seen_at = now()`,
           [identity.sub, identity.email, identity.name]
         );
+        if (before?.kind === "anonymous") await adoptAnonymous(client, before.sub, identity.sub);
         return createSession(client, identity.sub, req.get("user-agent"));
       });
+      if (before?.kind !== "anonymous") await destroySession(pool, req).catch(() => {});
       setSessionCookie(res, token);
-      res.redirect(302, "/");
+      res.redirect(302, before?.kind === "anonymous" ? "/#upgraded" : "/");
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // No Google, no email: the account is this browser's cookie and nothing else.
+  router.post("/auth/anonymous", requireSameOrigin, async (req, res, next) => {
+    const { allowed, retryAfter } = consume(`anon:${req.ip}`, LIMITS.anonymous);
+    if (!allowed) return rejectRateLimited(res, LIMITS.anonymous, retryAfter);
+    try {
+      const existing = await currentUser(pool, req);
+      if (existing) return res.json({ ok: true, existing: true });
+      const token = await withTx(pool, async (client) => {
+        const sub = await createAnonymousUser(client, readLocale(req.body?.locale));
+        return createSession(client, sub, req.get("user-agent"));
+      });
+      setSessionCookie(res, token);
+      res.status(201).json({ ok: true });
     } catch (err) {
       next(err);
     }
   });
 
   router.get("/api/me", requireSession(pool), (req, res) => {
-    res.json(req.user);
+    res.json({ ...req.user, is_admin: isAdmin(req.user) });
+  });
+
+  router.patch("/api/me", requireSession(pool), requireSameOrigin, async (req, res, next) => {
+    if (!("locale" in (req.body ?? {}))) return res.status(400).json({ error: "nothing_to_update" });
+    const locale = req.body.locale === null ? null : readLocale(req.body.locale);
+    if (req.body.locale !== null && !locale) return res.status(400).json({ error: "bad_locale" });
+    try {
+      await pool.query("UPDATE users SET locale = $2 WHERE sub = $1", [req.user.sub, locale]);
+      res.json({ ok: true, locale });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.delete("/api/me", requireSession(pool), requireSameOrigin, async (req, res, next) => {
+    try {
+      await withTx(pool, (client) => deleteAccount(client, req.user.sub));
+      clearSessionCookie(res);
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
   });
 
   router.post("/api/logout", requireSameOrigin, async (req, res, next) => {

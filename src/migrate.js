@@ -1,4 +1,7 @@
-export const RETENTION_DAYS = 7;
+// The server is a relay, not an archive: each device keeps its own copy of what
+// it received, and the server holds messages only long enough for a device that
+// was offline for a weekend to catch up.
+export const RETENTION_DAYS = 3;
 
 // Partitions are created well ahead of time on purpose. An insert whose
 // created_at falls outside every partition fails outright, so the lead time is
@@ -80,7 +83,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
   PRIMARY KEY (created_at, notification_id, device_id)
 ) PARTITION BY RANGE (created_at);
 -- Partial on purpose: the queue index stays proportional to outstanding work,
--- not to the 7 days of delivery history sitting in the same table.
+-- not to the days of delivery history sitting in the same table.
 CREATE INDEX IF NOT EXISTS deliveries_queue_idx
   ON deliveries (next_attempt_at) WHERE state = 'pending';
 
@@ -97,6 +100,71 @@ CREATE TABLE IF NOT EXISTS dedupe (
   PRIMARY KEY (user_sub, dedupe_key)
 );
 CREATE INDEX IF NOT EXISTS dedupe_expiry_idx ON dedupe (expires_at);
+
+-- Anonymous accounts have no email; kind tells them apart from Google ones.
+ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'google';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locale text;
+
+-- Services (Eliezer, ...) that deliver to many users. Registered by an admin;
+-- they authenticate with a key whose hash lives here, and reach a user only
+-- through a subscription the user created by handing them a link code.
+CREATE TABLE IF NOT EXISTS sources (
+  id              text PRIMARY KEY,
+  name            text NOT NULL,
+  name_he         text,
+  description     text,
+  description_he  text,
+  accent          text,
+  icon_png        bytea,
+  icon_etag       text,
+  link_methods    jsonb NOT NULL DEFAULT '[]',
+  key_hash        bytea NOT NULL,
+  key_prefix      text NOT NULL,
+  rate_per_minute int NOT NULL DEFAULT 600,
+  enabled         boolean NOT NULL DEFAULT true,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+-- subject_hash is the source's own stable id for whoever redeemed the code
+-- (hashed, so a phone number never lands here). It makes redeeming idempotent
+-- for the same subject, and keeps a relink from minting a second, duplicate
+-- subscription.
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id              text PRIMARY KEY,
+  user_sub        text NOT NULL REFERENCES users(sub) ON DELETE CASCADE,
+  source_id       text NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  subject_hash    bytea NOT NULL,
+  label           text,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  last_message_at timestamptz,
+  revoked_at      timestamptz
+);
+CREATE INDEX IF NOT EXISTS subscriptions_user_idx
+  ON subscriptions (user_sub) WHERE revoked_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_subject_idx
+  ON subscriptions (user_sub, source_id, subject_hash) WHERE revoked_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS link_codes (
+  id              text PRIMARY KEY,
+  code_hash       bytea NOT NULL UNIQUE,
+  user_sub        text NOT NULL REFERENCES users(sub) ON DELETE CASCADE,
+  source_id       text NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  expires_at      timestamptz NOT NULL,
+  state           text NOT NULL DEFAULT 'pending',
+  subscription_id text
+);
+CREATE INDEX IF NOT EXISTS link_codes_user_idx ON link_codes (user_sub, source_id);
+CREATE INDEX IF NOT EXISTS link_codes_expiry_idx ON link_codes (expires_at);
+
+-- Messages from a source carry which one, so the app can show its logo and
+-- name even after the source is renamed.
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS source_id text;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS subscription_id text;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS subtitle text;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS kind text;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS lang text;
 `;
 
 function dayKey(d) {
