@@ -1265,6 +1265,12 @@ async function renderAdmin() {
           el("div", { class: "grow" }, [
             el("h3", {}, [el("span", { text: source.name }), source.enabled ? null : el("span", { class: "tag", text: t("disabled") })]),
             el("p", {}, [el("code", { text: source.id }), ` · ${t("subscribers", source.subscriptions)} · ${t("keyPrefix", source.key_prefix)}`]),
+            source.link_stats
+              ? el("p", {
+                  class: "hint",
+                  text: t("codeStats", source.link_stats, formatters().date.format(Date.parse(source.link_stats.since))),
+                })
+              : null,
           ]),
         ]),
         el("div", { style: "margin-top:16px" }, [sourceEditor(source)]),

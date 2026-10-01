@@ -1,4 +1,5 @@
 import { RETENTION_DAYS, dropExpiredPartitions, ensurePartitions } from "./migrate.js";
+import { countLinkCodes } from "./link-stats.js";
 
 const INTERVAL_MS = 60 * 60 * 1000;
 
@@ -15,7 +16,7 @@ const LOCK_ID = 9138;
 // 410 and unbinds, rather than a 410 that could equally mean "never existed".
 const REVOKED_KEEP_DAYS = 30;
 
-async function sweep(pool) {
+export async function sweep(pool) {
   const client = await pool.connect();
   try {
     const { rows: lock } = await client.query("SELECT pg_try_advisory_lock($1) AS ok", [LOCK_ID]);
@@ -41,9 +42,16 @@ async function sweep(pool) {
         `DELETE FROM devices WHERE last_seen_at < now() - make_interval(days => $1)`,
         [DEVICE_IDLE_DAYS]
       );
+      // A code still "pending" here expired without anyone ever sending it; the
+      // other outcomes were counted when they happened.
       const links = await client.query(
-        "DELETE FROM link_codes WHERE expires_at < now() - interval '1 hour'"
+        "DELETE FROM link_codes WHERE expires_at < now() - interval '1 hour' RETURNING source_id, state"
       );
+      const unused = new Map();
+      for (const { source_id, state } of links.rows) {
+        if (state === "pending") unused.set(source_id, (unused.get(source_id) ?? 0) + 1);
+      }
+      for (const [sourceId, n] of unused) await countLinkCodes(client, sourceId, "unused", n);
       const revoked = await client.query(
         "DELETE FROM subscriptions WHERE revoked_at < now() - make_interval(days => $1)",
         [REVOKED_KEEP_DAYS]

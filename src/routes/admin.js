@@ -77,8 +77,18 @@ export function adminRoutes(pool) {
 
   router.get("/api/admin/sources", async (req, res, next) => {
     try {
-      const { rows } = await pool.query(`SELECT ${COLUMNS} FROM sources s ORDER BY s.created_at`);
-      res.json({ sources: rows });
+      const [{ rows }, { rows: stats }] = await Promise.all([
+        pool.query(`SELECT ${COLUMNS} FROM sources s ORDER BY s.created_at`),
+        pool.query(
+          `SELECT source_id, min(day) AS since,
+                  sum(created)::int AS created, sum(linked)::int AS linked,
+                  sum(tried_expired)::int AS tried_expired, sum(unused)::int AS unused,
+                  sum(replaced)::int AS replaced
+             FROM link_code_stats GROUP BY source_id`
+        ),
+      ]);
+      const bySource = new Map(stats.map(({ source_id, ...rest }) => [source_id, rest]));
+      res.json({ sources: rows.map((row) => ({ ...row, link_stats: bySource.get(row.id) ?? null })) });
     } catch (err) {
       next(err);
     }

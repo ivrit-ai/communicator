@@ -4,6 +4,7 @@ import { requireSameOrigin, requireSession } from "../auth-session.js";
 import { CODE_TTL_MINUTES, generateCode, hashCode, normalizeCode } from "../link-code.js";
 import { LIMITS, consume, rejectRateLimited } from "../rate-limit.js";
 import { MAX_SUBSCRIPTIONS } from "./source-api.js";
+import { countLinkCodes } from "../link-stats.js";
 
 function fill(template, code) {
   return template ? template.replaceAll("{code}", code) : null;
@@ -97,16 +98,18 @@ export function linkRoutes(pool) {
       const code = generateCode();
       // One live code per user and source: an earlier one on another tab
       // stops working, so there is never a question of which one counts.
-      await pool.query(
+      const replaced = await pool.query(
         "DELETE FROM link_codes WHERE user_sub = $1 AND source_id = $2 AND state = 'pending'",
         [req.user.sub, sourceId]
       );
+      await countLinkCodes(pool, sourceId, "replaced", replaced.rowCount);
       const { rows: inserted } = await pool.query(
         `INSERT INTO link_codes (id, code_hash, user_sub, source_id, expires_at)
          VALUES ($1, $2, $3, $4, now() + make_interval(mins => $5))
          RETURNING expires_at`,
         [id, hashCode(normalizeCode(code)), req.user.sub, sourceId, CODE_TTL_MINUTES]
       );
+      await countLinkCodes(pool, sourceId, "created");
       res.status(201).json({
         link_id: id,
         code,

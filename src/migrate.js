@@ -158,6 +158,19 @@ CREATE TABLE IF NOT EXISTS link_codes (
 CREATE INDEX IF NOT EXISTS link_codes_user_idx ON link_codes (user_sub, source_id);
 CREATE INDEX IF NOT EXISTS link_codes_expiry_idx ON link_codes (expires_at);
 
+-- How link codes end, per source and day, for the admin page. The codes
+-- themselves are deleted an hour after expiring; these counts are what is left.
+CREATE TABLE IF NOT EXISTS link_code_stats (
+  source_id     text NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  day           date NOT NULL,
+  created       int NOT NULL DEFAULT 0,
+  linked        int NOT NULL DEFAULT 0,
+  tried_expired int NOT NULL DEFAULT 0,
+  unused        int NOT NULL DEFAULT 0,
+  replaced      int NOT NULL DEFAULT 0,
+  PRIMARY KEY (source_id, day)
+);
+
 -- Messages from a source carry which one, so the app can show its logo and
 -- name even after the source is renamed.
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS source_id text;

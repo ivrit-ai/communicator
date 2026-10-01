@@ -13,6 +13,7 @@ import {
 } from "./harness.js";
 import { adoptAnonymous } from "../src/accounts.js";
 import { dropExpiredPartitions, ensurePartitions } from "../src/migrate.js";
+import { sweep } from "../src/maintenance.js";
 
 let pool;
 let push;
@@ -418,6 +419,40 @@ describe("source messages", () => {
     assert.equal(page.json.notifications[0].source_id, "eliezer");
     const latest = await app.call("GET", "/api/notifications", { cookie: user.cookie });
     assert.equal(latest.json.notifications[0].body, "three");
+  });
+});
+
+describe("link code stats", () => {
+  it("counts how each code ended, for the admin page", async () => {
+    const key = await createSource({ ...ELIEZER, id: "counted", name: "Counted" });
+    const mint = (user) => app.call("POST", "/api/links", { cookie: user.cookie, body: { source_id: "counted" } });
+    const redeem = (code, subject) =>
+      app.call("POST", "/api/source/v1/links", { bearer: key, origin: null, body: { code, subject } });
+
+    // Replaced by a newer code, which is then linked.
+    const a = await createUser(pool);
+    await mint(a);
+    const linked = await mint(a);
+    assert.equal((await redeem(linked.json.code, "a")).status, 201);
+    // Sent after it expired.
+    const b = await createUser(pool);
+    const late = await mint(b);
+    await pool.query("UPDATE link_codes SET expires_at = now() - interval '1 minute' WHERE id = $1", [late.json.link_id]);
+    assert.equal((await redeem(late.json.code, "b")).status, 410);
+    assert.equal((await redeem(late.json.code, "b")).status, 410); // counted once
+    // Never sent at all; counted when the sweep deletes it.
+    const c = await createUser(pool);
+    const idle = await mint(c);
+    await pool.query("UPDATE link_codes SET expires_at = now() - interval '2 hours' WHERE id = $1", [idle.json.link_id]);
+    await sweep(pool);
+
+    const res = await app.call("GET", "/api/admin/sources", { cookie: admin.cookie });
+    const stats = res.json.sources.find((s) => s.id === "counted").link_stats;
+    assert.deepEqual(
+      { ...stats, since: undefined },
+      { since: undefined, created: 4, linked: 1, tried_expired: 1, unused: 1, replaced: 1 }
+    );
+    assert.ok(stats.since);
   });
 });
 

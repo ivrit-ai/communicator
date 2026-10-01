@@ -39,7 +39,10 @@ async function startPostgres() {
     return `${out.stdout}${out.stderr}`;
   };
   while (logs().split("ready to accept connections").length < 3) {
-    if (Date.now() - started > 60_000) throw new Error("test Postgres did not start");
+    if (Date.now() - started > 60_000) {
+      stopDatabase();
+      throw new Error("test Postgres did not start");
+    }
     await new Promise((r) => setTimeout(r, 250));
   }
   return `postgresql://postgres:dev@127.0.0.1:${port}/notifier_test`;

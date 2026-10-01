@@ -170,6 +170,8 @@ const STRINGS = {
     keyOnce: "The source's key. Shown once — store it in the source's environment now.",
     keyPrefix: (p) => `key ${p}…`,
     subscribers: (n) => `${n} linked`,
+    codeStats: (c, since) =>
+      `Link codes since ${since}: ${c.created} created · ${c.linked} linked · ${c.unused} never used · ${c.tried_expired} tried after expiring · ${c.replaced} replaced`,
     disabled: "disabled",
     deleteSource: "Delete source",
     deleteSourceConfirm: (name) => `Delete ${name} and every link to it? This can't be undone.`,
@@ -411,6 +413,8 @@ const STRINGS = {
     keyOnce: "המפתח של המקור. מוצג פעם אחת — שמרו אותו עכשיו בסביבה של המקור.",
     keyPrefix: (p) => `מפתח ${p}…`,
     subscribers: (n) => `${n} מקושרים`,
+    codeStats: (c, since) =>
+      `קודי קישור מאז ${since}: ${c.created} נוצרו · ${c.linked} קושרו · ${c.unused} לא נוצלו · ${c.tried_expired} נשלחו אחרי שפג תוקפם · ${c.replaced} הוחלפו`,
     disabled: "מושבת",
     deleteSource: "מחיקת המקור",
     deleteSourceConfirm: (name) => `למחוק את ${name} ואת כל הקישורים אליו? אי אפשר לבטל.`,

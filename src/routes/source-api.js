@@ -6,6 +6,7 @@ import { requireSourceKey } from "../auth-source.js";
 import { hashCode, normalizeCode } from "../link-code.js";
 import { LIMITS, consume, rejectRateLimited } from "../rate-limit.js";
 import { checkField, claimDedupe, insertAndFanOut } from "./notify.js";
+import { countLinkCodes } from "../link-stats.js";
 
 // Transcripts are long: a ten-minute voice note in Hebrew runs to ~15 KB of
 // UTF-8. The push itself carries a preview; the device fetches the rest.
@@ -69,10 +70,11 @@ export function sourceApiRoutes(pool) {
         if (link.expired || link.state !== "pending") {
           // Recorded, so the page the user is watching can say "that code
           // expired" instead of spinning until they give up.
-          await client.query(
+          const tried = await client.query(
             "UPDATE link_codes SET state = 'expired_attempt' WHERE id = $1 AND state = 'pending'",
             [link.id]
           );
+          await countLinkCodes(client, req.source.id, "tried_expired", tried.rowCount);
           return { status: 410, body: { error: "expired_code" } };
         }
 
@@ -111,6 +113,7 @@ export function sourceApiRoutes(pool) {
           "UPDATE link_codes SET state = 'linked', subscription_id = $2 WHERE id = $1",
           [link.id, subscriptionId]
         );
+        await countLinkCodes(client, req.source.id, "linked");
         return { status: 201, body: { subscription_id: subscriptionId } };
       });
       res.status(result.status).json(result.body);
