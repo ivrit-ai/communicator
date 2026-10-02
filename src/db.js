@@ -10,10 +10,20 @@ pg.types.setTypeParser(1114, (v) => new Date(v + "Z"));
 // Postgres max_connections for a channel database is not documented, so the
 // two processes split a deliberately conservative budget rather than each
 // assuming it owns the server.
-const POOL_SIZE = { web: 10, sender: 6 };
+const POOL_SIZE = { web: 10, sender: 6, session: 2 };
+
+// DATABASE_URL can go through a transaction pooler, which lends a server
+// connection per transaction. A session advisory lock outlives the
+// transaction that took it, so the "session" pool, which migrate and the
+// maintenance sweep use for their locks, connects to the server itself.
+// Without a pooler, DATABASE_URL_DIRECT is unset or names the same server.
+function urlFor(role) {
+  if (role === "session") return process.env.DATABASE_URL_DIRECT || process.env.DATABASE_URL;
+  return process.env.DATABASE_URL;
+}
 
 export function createPool(role) {
-  const url = process.env.DATABASE_URL;
+  const url = urlFor(role);
   if (!url) {
     console.error("FATAL: DATABASE_URL is not set");
     process.exit(1);

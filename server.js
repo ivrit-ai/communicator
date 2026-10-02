@@ -48,6 +48,8 @@ let sender = null;
 let maintenance = null;
 
 const pool = createPool("web");
+// Migrations and the maintenance sweep hold session advisory locks; see db.js.
+const sessionPool = createPool("session");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -122,10 +124,10 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
 });
 
 async function boot() {
-  await migrate(pool);
+  await migrate(sessionPool);
   // Only after migrations, so the sender can never query a half-built schema.
   sender = superviseSender();
-  maintenance = startMaintenance(pool);
+  maintenance = startMaintenance(sessionPool);
   probeEgress();
 }
 
