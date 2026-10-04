@@ -1265,6 +1265,7 @@ async function renderAdmin() {
           el("div", { class: "grow" }, [
             el("h3", {}, [el("span", { text: source.name }), source.enabled ? null : el("span", { class: "tag", text: t("disabled") })]),
             el("p", {}, [el("code", { text: source.id }), ` · ${t("subscribers", source.subscriptions)} · ${t("keyPrefix", source.key_prefix)}`]),
+            source.platforms ? el("p", { class: "hint", text: t("platformStats", source.platforms) }) : null,
             source.link_stats
               ? el("p", {
                   class: "hint",

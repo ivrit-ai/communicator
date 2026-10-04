@@ -183,15 +183,15 @@ export async function createUser(pool, { sub, email = null, kind = "google", loc
 
 // A device whose push endpoint is the local push service, with real keys so
 // its pushes can be decrypted.
-export async function createDevice(pool, userSub, push) {
+export async function createDevice(pool, userSub, push, { userAgent = null } = {}) {
   const ecdh = createECDH("prime256v1");
   ecdh.generateKeys();
   const auth = randomBytes(16).toString("base64url");
   const endpoint = `https://localhost:${push.port}/push/${randomBytes(6).toString("hex")}`;
   const { rows } = await pool.query(
-    `INSERT INTO devices (user_sub, endpoint_hash, endpoint, p256dh, auth)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [userSub, createHash("sha256").update(endpoint).digest(), endpoint, ecdh.getPublicKey("base64url"), auth]
+    `INSERT INTO devices (user_sub, endpoint_hash, endpoint, p256dh, auth, user_agent)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+    [userSub, createHash("sha256").update(endpoint).digest(), endpoint, ecdh.getPublicKey("base64url"), auth, userAgent]
   );
   return { id: String(rows[0].id), endpoint, ecdh, auth };
 }

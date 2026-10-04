@@ -77,8 +77,27 @@ export function adminRoutes(pool) {
 
   router.get("/api/admin/sources", async (req, res, next) => {
     try {
-      const [{ rows }, { rows: stats }] = await Promise.all([
+      const [{ rows }, { rows: platforms }, { rows: stats }] = await Promise.all([
         pool.query(`SELECT ${COLUMNS} FROM sources s ORDER BY s.created_at`),
+        // Each linked user by the platforms of their devices, read from the user
+        // agent the device registered with. A user with an iPhone and a laptop
+        // counts under both; one whose devices are all gone counts as none.
+        pool.query(
+          `SELECT x.source_id,
+                  count(DISTINCT x.user_sub) FILTER (WHERE d.platform = 'iphone')::int AS iphone,
+                  count(DISTINCT x.user_sub) FILTER (WHERE d.platform = 'android')::int AS android,
+                  count(DISTINCT x.user_sub) FILTER (WHERE d.platform = 'other')::int AS other,
+                  count(DISTINCT x.user_sub) FILTER (WHERE d.platform IS NULL)::int AS none
+             FROM subscriptions x
+             LEFT JOIN LATERAL (
+               SELECT CASE WHEN user_agent ~ 'iPhone|iPad' THEN 'iphone'
+                           WHEN user_agent ~ 'Android' THEN 'android'
+                           ELSE 'other' END AS platform
+                 FROM devices WHERE user_sub = x.user_sub
+             ) d ON true
+            WHERE x.revoked_at IS NULL
+            GROUP BY x.source_id`
+        ),
         pool.query(
           `SELECT source_id, min(day) AS since,
                   sum(created)::int AS created, sum(linked)::int AS linked,
@@ -87,8 +106,16 @@ export function adminRoutes(pool) {
              FROM link_code_stats GROUP BY source_id`
         ),
       ]);
-      const bySource = new Map(stats.map(({ source_id, ...rest }) => [source_id, rest]));
-      res.json({ sources: rows.map((row) => ({ ...row, link_stats: bySource.get(row.id) ?? null })) });
+      const bySource = (list) => new Map(list.map(({ source_id, ...rest }) => [source_id, rest]));
+      const platformsBySource = bySource(platforms);
+      const statsBySource = bySource(stats);
+      res.json({
+        sources: rows.map((row) => ({
+          ...row,
+          platforms: platformsBySource.get(row.id) ?? null,
+          link_stats: statsBySource.get(row.id) ?? null,
+        })),
+      });
     } catch (err) {
       next(err);
     }

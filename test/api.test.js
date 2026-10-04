@@ -454,6 +454,35 @@ describe("link code stats", () => {
     );
     assert.ok(stats.since);
   });
+
+  it("counts linked users by the platform of their devices", async () => {
+    const key = await createSource({ ...ELIEZER, id: "platforms", name: "Platforms" });
+    const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15";
+    const ANDROID = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36";
+    const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15";
+    const link = async (subject, ...agents) => {
+      const user = await createUser(pool);
+      for (const userAgent of agents) await createDevice(pool, user.sub, push, { userAgent });
+      const minted = await app.call("POST", "/api/links", { cookie: user.cookie, body: { source_id: "platforms" } });
+      const redeemed = await app.call("POST", "/api/source/v1/links", {
+        bearer: key, origin: null, body: { code: minted.json.code, subject },
+      });
+      assert.equal(redeemed.status, 201);
+      return redeemed.json.subscription_id;
+    };
+
+    await link("phone", IPHONE, IPHONE); // two iPhones, one user
+    await link("both", IPHONE, MAC);
+    await link("android", ANDROID);
+    await link("bare");
+    const gone = await link("gone", ANDROID);
+    await app.call("DELETE", `/api/source/v1/subscriptions/${gone}`, { bearer: key, origin: null });
+
+    const res = await app.call("GET", "/api/admin/sources", { cookie: admin.cookie });
+    assert.deepEqual(res.json.sources.find((s) => s.id === "platforms").platforms, {
+      iphone: 2, android: 1, other: 1, none: 1,
+    });
+  });
 });
 
 describe("retention", () => {
