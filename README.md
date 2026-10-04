@@ -53,6 +53,7 @@ local HTTPS push service that decrypts what the sender delivers.
 
 ## Deploying
 
-Runs on xhostd as the app `notifier` (channel `prod`, deployed from `master`). Push `master`
-to `git@git.xhostd.com:bender/notifier.git`, then deploy that commit to `prod`. Icons are
-rendered from `assets/` with `scripts/build-icons.sh`.
+Runs on xhostd as the app `notifier` (channel `prod`, deployed from `master`). The app's
+source is this GitHub repo (`ivrit-ai/communicator`): push `master` here, then deploy that
+commit to `prod`; the deploy pulls it from GitHub. Never push to the app's xhostd repo
+directly. Icons are rendered from `assets/` with `scripts/build-icons.sh`.
