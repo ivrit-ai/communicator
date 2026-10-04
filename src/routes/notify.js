@@ -155,19 +155,33 @@ export function notifyRoutes(pool) {
     requireSession(pool),
     requireSameOrigin,
     async (req, res, next) => {
+      // A delay gives the user time to leave the app, so the test shows what a
+      // real message does when the app is closed: pop up, or only appear in the
+      // notification list.
+      const delay = Math.max(0, Math.min(Math.trunc(Number(req.body?.delay_seconds) || 0), 30));
       const at = Date.now();
+      const id = ulid(at);
+      const createdAt = new Date(at);
       try {
-        const devices = await withTx(pool, (client) =>
-          insertAndFanOut(client, {
-            createdAt: new Date(at),
-            id: ulid(at),
+        const devices = await withTx(pool, async (client) => {
+          const n = await insertAndFanOut(client, {
+            createdAt,
+            id,
             userSub: req.user.sub,
             source: "Communicator",
             kind: "test",
             ...TEST_MESSAGE[req.user.locale === "he" ? "he" : "en"],
-          })
-        );
-        res.status(202).json({ devices });
+          });
+          if (delay) {
+            await client.query(
+              `UPDATE deliveries SET next_attempt_at = now() + make_interval(secs => $3)
+                WHERE created_at = $1 AND notification_id = $2`,
+              [createdAt, id, delay]
+            );
+          }
+          return n;
+        });
+        res.status(202).json({ devices, delay_seconds: delay });
       } catch (err) {
         next(err);
       }

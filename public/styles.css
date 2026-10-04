@@ -1690,3 +1690,15 @@ h4.field {
     padding: 8px;
   }
 }
+
+.popup-test {
+  margin-top: 14px;
+}
+
+.popup-test .stack {
+  max-width: 360px;
+}
+
+.countdown {
+  font-variant-numeric: tabular-nums;
+}

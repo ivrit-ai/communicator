@@ -422,6 +422,27 @@ describe("source messages", () => {
   });
 });
 
+describe("test notification", () => {
+  it("can be delayed, so the user can leave the app first, and the delay is capped", async () => {
+    const user = await createUser(pool);
+    await createDevice(pool, user.sub, push);
+    const delayed = await app.call("POST", "/api/test", { cookie: user.cookie, body: { delay_seconds: 10 } });
+    assert.equal(delayed.status, 202);
+    assert.deepEqual(delayed.json, { devices: 1, delay_seconds: 10 });
+    const { rows } = await pool.query(
+      `SELECT d.next_attempt_at > now() + interval '5 seconds' AS later
+         FROM deliveries d JOIN devices v ON v.id = d.device_id
+        WHERE v.user_sub = $1`,
+      [user.sub]
+    );
+    assert.equal(rows[0].later, true);
+    const capped = await app.call("POST", "/api/test", { cookie: user.cookie, body: { delay_seconds: 999 } });
+    assert.equal(capped.json.delay_seconds, 30);
+    const now = await app.call("POST", "/api/test", { cookie: user.cookie });
+    assert.equal(now.json.delay_seconds, 0);
+  });
+});
+
 describe("link code stats", () => {
   it("counts how each code ended, for the admin page", async () => {
     const key = await createSource({ ...ELIEZER, id: "counted", name: "Counted" });

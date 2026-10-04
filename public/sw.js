@@ -1,7 +1,7 @@
 importScripts("/store.js");
 
 const store = self.NotifierStore;
-const SHELL = "shell-v9";
+const SHELL = "shell-v10";
 const SHELL_FILES = [
   "/",
   "/app.js",

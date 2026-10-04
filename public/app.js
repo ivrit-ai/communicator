@@ -1360,14 +1360,96 @@ $("enable").addEventListener("click", async () => {
   renderDiagnostics();
 });
 
-$("test").addEventListener("click", async () => {
+// The pop-up test. A notification arrives while the app is closed, and the
+// user says what they saw: whether it popped up is the phone's per-app setting,
+// which no web page can read or change, so the fix is to show them where it is.
+const TEST_DELAY_SECONDS = 10;
+let popupTestTimer = null;
+let popupAskTimer = null;
+
+function popupKind() {
+  const { os } = platform();
+  return os === "ios" ? "Ios" : os === "android" ? "Android" : "Desktop";
+}
+
+function stepsPanel(title, lead, steps, again) {
+  return el("div", { class: "help" }, [
+    el("h3", { text: title }),
+    el("p", { class: "muted", text: lead }),
+    el("ol", {}, steps.map((step) => el("li", { text: step }))),
+    el("div", { class: "row" }, [el("button", { class: "btn", type: "button", text: t("testAgain"), onclick: again })]),
+  ]);
+}
+
+function showPopupTest(...children) {
+  const box = $("popup-test");
+  box.replaceChildren(...children);
+  box.hidden = !children.length;
+}
+
+function askPopupResult() {
+  const answer = (kind) => () => {
+    if (kind === "popped") {
+      showPopupTest();
+      return toast(t("testAllGood"));
+    }
+    if (kind === "list") {
+      return showPopupTest(stepsPanel(t("popupHelpTitle"), t("popupHelpLead"), t(`popup${popupKind()}`), runPopupTest));
+    }
+    // Nothing at all: a block we can see explains it first; otherwise it is the device.
+    const trouble = notificationTrouble();
+    if (trouble) return showPopupTest(helpPanel(trouble, { retry: runPopupTest }));
+    showPopupTest(stepsPanel(t("nothingHelpTitle"), t("nothingHelpLead"), t(`nothing${popupKind()}`), runPopupTest));
+  };
+  showPopupTest(
+    el("p", { class: "step-label", text: t("testAsk") }),
+    el("div", { class: "stack" }, [
+      el("button", { class: "btn", type: "button", text: t("testPopped"), onclick: answer("popped") }),
+      el("button", { class: "btn", type: "button", text: t("testListOnly"), onclick: answer("list") }),
+      el("button", { class: "btn", type: "button", text: t("testNothing"), onclick: answer("nothing") }),
+    ])
+  );
+}
+
+async function runPopupTest() {
+  clearInterval(popupTestTimer);
+  clearTimeout(popupAskTimer);
+  let sent;
   try {
-    const { devices } = await post("/api/test");
-    toast(t("testSent", devices));
+    sent = await post("/api/test", { delay_seconds: TEST_DELAY_SECONDS });
   } catch (err) {
-    toast(t("error", err.message));
+    return toast(t("error", err.message));
   }
-});
+  if (!sent.devices) return toast(t("testSent", 0));
+  // Counted against the clock, not ticks: timers sleep while the app is in the
+  // background, which is exactly where the user is meant to be.
+  const due = Date.now() + sent.delay_seconds * 1000;
+  const count = el("b", { class: "countdown" });
+  const tick = () => {
+    const left = Math.ceil((due - Date.now()) / 1000);
+    if (left > 0) return void (count.textContent = `0:${String(left).padStart(2, "0")}`);
+    clearInterval(popupTestTimer);
+    // A few seconds' grace for delivery before asking.
+    popupAskTimer = setTimeout(askPopupResult, Math.max(0, due + 4000 - Date.now()));
+  };
+  showPopupTest(
+    el("p", { class: "step-label" }, [`${t("testLeave")} `, count, ". ", t("testWatch")]),
+    el("button", {
+      class: "btn quiet small",
+      type: "button",
+      text: t("testCancel"),
+      onclick: () => {
+        clearInterval(popupTestTimer);
+        clearTimeout(popupAskTimer);
+        showPopupTest();
+      },
+    })
+  );
+  tick();
+  popupTestTimer = setInterval(tick, 500);
+}
+
+$("test").addEventListener("click", runPopupTest);
 
 $("clear-history").addEventListener("click", async () => {
   if (!(await ask(t("clearConfirm"), { ok: t("delete"), danger: true }))) return;
