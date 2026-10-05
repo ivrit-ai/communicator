@@ -13,6 +13,7 @@ import { notificationRoutes } from "./src/routes/notifications.js";
 import { linkRoutes } from "./src/routes/links.js";
 import { sourceApiRoutes } from "./src/routes/source-api.js";
 import { adminRoutes } from "./src/routes/admin.js";
+import { cors } from "./src/cors.js";
 import { superviseSender } from "./src/supervise.js";
 import { startMaintenance } from "./src/maintenance.js";
 
@@ -72,6 +73,9 @@ app.use(
 
 // Everything that can touch Postgres sits behind this. GET / deliberately does
 // not, so a database blip never fails the health probe.
+// Other ivrit.ai apps call the API from their own origin; see src/cors.js.
+app.use(["/api", "/auth"], cors);
+
 app.use(["/api", "/auth"], (req, res, next) => {
   if (!ready) return res.status(503).json({ status: "starting" });
   next();

@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readCookie } from "./cookies.js";
 import { trustedHost } from "./auth-platform.js";
+import { allowedAppOrigin } from "./cors.js";
 
 const SESSION_COOKIE = "__Host-notifier_sess";
 const TTL_DAYS = 90;
@@ -104,6 +105,8 @@ export function requireSession(pool) {
 export function requireSameOrigin(req, res, next) {
   const origin = req.get("origin");
   if (!origin) return res.status(403).json({ error: "origin_required" });
+  // Other ivrit.ai apps acting for the signed-in user (see cors.js).
+  if (allowedAppOrigin(origin)) return next();
   let originHost;
   try {
     originHost = new URL(origin).hostname.toLowerCase();

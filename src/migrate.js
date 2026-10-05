@@ -158,6 +158,10 @@ CREATE TABLE IF NOT EXISTS link_codes (
 CREATE INDEX IF NOT EXISTS link_codes_user_idx ON link_codes (user_sub, source_id);
 CREATE INDEX IF NOT EXISTS link_codes_expiry_idx ON link_codes (expires_at);
 
+-- Which app a device belongs to: Communicator's website ("web") or the
+-- ivrit.ai app ("app"), which registers devices through the same API.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS client text NOT NULL DEFAULT 'web';
+
 -- How link codes end, per source and day, for the admin page. The codes
 -- themselves are deleted an hour after expiring; these counts are what is left.
 CREATE TABLE IF NOT EXISTS link_code_stats (

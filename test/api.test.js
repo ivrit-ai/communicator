@@ -15,6 +15,8 @@ import { adoptAnonymous } from "../src/accounts.js";
 import { dropExpiredPartitions, ensurePartitions } from "../src/migrate.js";
 import { sweep } from "../src/maintenance.js";
 
+const APP_ORIGIN = "https://app.example.test";
+
 let pool;
 let push;
 let app;
@@ -40,7 +42,7 @@ const ELIEZER = {
 before(async () => {
   pool = await freshDatabase();
   push = await startPushService();
-  app = await startApp();
+  app = await startApp({ APP_ORIGINS: APP_ORIGIN });
   admin = await createUser(pool, { email: ADMIN_EMAIL });
 });
 
@@ -422,6 +424,71 @@ describe("source messages", () => {
   });
 });
 
+describe("the API as a service for other ivrit.ai apps", () => {
+  it("answers preflights and credentialed requests from an allowed app origin only", async () => {
+    const user = await createUser(pool);
+    const pre = await fetch(`${app.origin}/api/devices`, {
+      method: "OPTIONS",
+      headers: { origin: APP_ORIGIN, "access-control-request-method": "POST", "access-control-request-headers": "content-type" },
+    });
+    assert.equal(pre.status, 204);
+    assert.equal(pre.headers.get("access-control-allow-origin"), APP_ORIGIN);
+    assert.equal(pre.headers.get("access-control-allow-credentials"), "true");
+
+    const me = await app.call("GET", "/api/me", { cookie: user.cookie, origin: APP_ORIGIN });
+    assert.equal(me.status, 200);
+    assert.equal(me.headers.get("access-control-allow-origin"), APP_ORIGIN);
+    const other = await app.call("GET", "/api/me", { cookie: user.cookie, origin: "https://evil.example" });
+    assert.equal(other.headers.get("access-control-allow-origin"), null);
+  });
+
+  it("lets the app act for the signed-in user, and nobody else", async () => {
+    const user = await createUser(pool);
+    const fromApp = await app.call("POST", "/api/tokens", { cookie: user.cookie, origin: APP_ORIGIN, body: { name: "from-app" } });
+    assert.equal(fromApp.status, 201);
+    const fromElsewhere = await app.call("POST", "/api/tokens", {
+      cookie: user.cookie,
+      origin: "https://evil.example",
+      body: { name: "nope" },
+    });
+    assert.equal(fromElsewhere.status, 403);
+  });
+
+  it("records which app a device belongs to", async () => {
+    const user = await createUser(pool);
+    const subscription = {
+      endpoint: "https://fcm.googleapis.com/fcm/send/app-device-1",
+      keys: { p256dh: "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U", auth: "tBHItJI5svbpez7KI4CCXg" },
+      label: "Chrome · Android",
+    };
+    const res = await app.call("POST", "/api/devices", { cookie: user.cookie, origin: APP_ORIGIN, body: { ...subscription, client: "app" } });
+    assert.equal(res.status, 201, res.text);
+    const list = await app.call("GET", "/api/devices", { cookie: user.cookie });
+    assert.equal(list.json.devices[0].client, "app");
+    const web = await app.call("POST", "/api/devices", {
+      cookie: user.cookie,
+      body: { ...subscription, endpoint: "https://fcm.googleapis.com/fcm/send/web-device-1", client: "anything-else" },
+    });
+    assert.equal(web.status, 201);
+    const both = await app.call("GET", "/api/devices", { cookie: user.cookie });
+    assert.deepEqual(both.json.devices.map((d) => d.client).sort(), ["app", "web"]);
+  });
+
+  it("sends sign-ins back only to this site or an allowed app", async () => {
+    process.env.APP_ORIGINS = APP_ORIGIN;
+    const { safeNext } = await import("../src/routes/auth.js");
+    assert.equal(safeNext("/settings"), "/settings");
+    assert.equal(safeNext(`${APP_ORIGIN}/inbox?x=1#m/2`), `${APP_ORIGIN}/inbox?x=1#m/2`);
+    for (const bad of ["//evil.example/x", "/\\evil.example", "https://evil.example/", "javascript:alert(1)", "", null]) {
+      assert.equal(safeNext(bad), null, String(bad));
+    }
+    const res = await app.call("GET", `/auth/complete?next=${encodeURIComponent(`${APP_ORIGIN}/`)}`);
+    // No platform identity here, so it bounces to login, keeping the destination.
+    assert.equal(res.status, 302);
+    assert.ok(decodeURIComponent(res.headers.get("location")).includes(`next=${encodeURIComponent(`${APP_ORIGIN}/`)}`));
+  });
+});
+
 describe("test notification", () => {
   it("can be delayed, so the user can leave the app first, and the delay is capped", async () => {
     const user = await createUser(pool);
@@ -501,7 +568,7 @@ describe("link code stats", () => {
 
     const res = await app.call("GET", "/api/admin/sources", { cookie: admin.cookie });
     assert.deepEqual(res.json.sources.find((s) => s.id === "platforms").platforms, {
-      iphone: 2, android: 1, other: 1, none: 1,
+      iphone: 2, android: 1, other: 1, none: 1, app: 0,
     });
   });
 });

@@ -13,9 +13,23 @@ import {
 } from "../auth-session.js";
 import { adoptAnonymous, createAnonymousUser, deleteAccount } from "../accounts.js";
 import { LIMITS, consume, rejectRateLimited } from "../rate-limit.js";
+import { allowedAppOrigin } from "../cors.js";
 
 const LOGIN = "/xhost-auth/login";
 const LOCALES = new Set(["en", "he"]);
+
+// Where to land after signing in: a path here, or a page of an allowed
+// ivrit.ai app. Anything else is ignored, so this is never an open redirect.
+export function safeNext(next) {
+  if (typeof next !== "string" || !next) return null;
+  if (next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\")) return next;
+  try {
+    const url = new URL(next);
+    return allowedAppOrigin(url.origin) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
 
 function readLocale(value) {
   return typeof value === "string" && LOCALES.has(value) ? value : null;
@@ -39,7 +53,8 @@ export function authRoutes(pool) {
       // Bounce to login once. Without the marker a permanently failing verify
       // (wrong host, clock skew) becomes an infinite redirect loop.
       if (req.query.retry) return res.status(401).type("text/plain").send("Sign-in failed.");
-      const back = encodeURIComponent("/auth/complete?retry=1");
+      const nextParam = safeNext(req.query.next) ? `&next=${encodeURIComponent(req.query.next)}` : "";
+      const back = encodeURIComponent(`/auth/complete?retry=1${nextParam}`);
       return res.redirect(302, `${LOGIN}?return_to=${back}`);
     }
 
@@ -58,7 +73,10 @@ export function authRoutes(pool) {
       });
       if (before?.kind !== "anonymous") await destroySession(pool, req).catch(() => {});
       setSessionCookie(res, token);
-      res.redirect(302, before?.kind === "anonymous" ? "/#upgraded" : "/");
+      const upgraded = before?.kind === "anonymous";
+      const landing = safeNext(req.query.next);
+      if (landing) return res.redirect(302, upgraded ? `${landing.split("#")[0]}#upgraded` : landing);
+      res.redirect(302, upgraded ? "/#upgraded" : "/");
     } catch (err) {
       next(err);
     }

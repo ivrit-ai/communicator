@@ -87,12 +87,13 @@ export function adminRoutes(pool) {
                   count(DISTINCT x.user_sub) FILTER (WHERE d.platform = 'iphone')::int AS iphone,
                   count(DISTINCT x.user_sub) FILTER (WHERE d.platform = 'android')::int AS android,
                   count(DISTINCT x.user_sub) FILTER (WHERE d.platform = 'other')::int AS other,
-                  count(DISTINCT x.user_sub) FILTER (WHERE d.platform IS NULL)::int AS none
+                  count(DISTINCT x.user_sub) FILTER (WHERE d.platform IS NULL)::int AS none,
+                  count(DISTINCT x.user_sub) FILTER (WHERE d.client = 'app')::int AS app
              FROM subscriptions x
              LEFT JOIN LATERAL (
                SELECT CASE WHEN user_agent ~ 'iPhone|iPad' THEN 'iphone'
                            WHEN user_agent ~ 'Android' THEN 'android'
-                           ELSE 'other' END AS platform
+                           ELSE 'other' END AS platform, client
                  FROM devices WHERE user_sub = x.user_sub
              ) d ON true
             WHERE x.revoked_at IS NULL

@@ -1,10 +1,13 @@
 import { detectLocale, localized, locale, setLocale, t } from "./i18n.js";
+import { ApiError, createCommunicator, pushSupported } from "./client/communicator.js";
 
 const $ = (id) => document.getElementById(id);
 const store = self.NotifierStore;
+// Communicator's own pages talk to their own origin; the client is shared
+// with other ivrit.ai apps (see client/communicator.js).
+const communicator = createCommunicator({ store, client: "web" });
+const { api, post, patch, del } = communicator;
 const RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const FIRST_ULID = "0".repeat(26);
-const RETENTION_MS = 3 * 86_400_000;
 
 const state = {
   me: null,
@@ -77,26 +80,6 @@ function ask(message, { ok = t("continue"), danger = false } = {}) {
   );
 }
 
-class ApiError extends Error {
-  constructor(status, detail) {
-    super(detail.error ?? String(status));
-    this.status = status;
-    this.detail = detail;
-  }
-}
-
-async function api(path, options = {}) {
-  const headers = { ...options.headers };
-  if (options.body && !headers["content-type"]) headers["content-type"] = "application/json";
-  const res = await fetch(path, { ...options, headers });
-  if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => ({})));
-  return res.status === 204 ? null : res.json();
-}
-
-const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body ?? {}) });
-const patch = (path, body) => api(path, { method: "PATCH", body: JSON.stringify(body) });
-const del = (path) => api(path, { method: "DELETE" });
-
 // Stable per-name colour for sources without a logo.
 function hue(name) {
   let h = 0;
@@ -161,43 +144,7 @@ function whenever(iso) {
 
 // ---------------------------------------------------------------- push
 
-function urlBase64ToUint8Array(base64) {
-  const padded = (base64 + "=".repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/");
-  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
-}
-
-const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
-
-async function currentSubscription(reg, vapidPublicKey) {
-  const existing = await reg.pushManager.getSubscription();
-  if (existing) {
-    // A subscription bound to a different VAPID key fails every send with
-    // 403 VapidPkHashMismatch — silently, and forever. Rebuild instead.
-    const bound = existing.options?.applicationServerKey;
-    const wanted = urlBase64ToUint8Array(vapidPublicKey);
-    if (bound && new Uint8Array(bound).every((b, i) => b === wanted[i])) return existing;
-    await existing.unsubscribe();
-  }
-  return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) });
-}
-
-async function registerThisDevice() {
-  const { vapidPublicKey } = await api("/api/config");
-  const reg = await navigator.serviceWorker.register("/sw.js");
-  await navigator.serviceWorker.ready;
-  const sub = await currentSubscription(reg, vapidPublicKey);
-  const { id } = await post("/api/devices", { ...sub.toJSON(), label: deviceLabel() });
-  localStorage.setItem("device_id", id);
-  localStorage.setItem("reconciled_at", String(Date.now()));
-  return id;
-}
-
-function deviceLabel() {
-  const ua = navigator.userAgent;
-  const os = /iPhone|iPad/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "macOS" : /Windows/.test(ua) ? "Windows" : "Linux";
-  const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
-  return `${browser} · ${os}`;
-}
+const registerThisDevice = () => communicator.registerDevice();
 
 // The safety net that works everywhere: Chrome has never shipped
 // pushsubscriptionchange, so re-upserting on open keeps endpoints fresh.
@@ -377,27 +324,7 @@ function renderNotifyBanner() {
 
 // ---------------------------------------------------------------- sync
 
-// Pull everything newer than the last message this device synced. The
-// server keeps three days; whatever arrives lands in the local store and
-// stays there.
-async function sync() {
-  let cursor = (await store.getMeta("cursor")) ?? FIRST_ULID;
-  for (let pages = 0; pages < 50; pages++) {
-    const page = await api(`/api/notifications?after=${cursor}&limit=100`);
-    if (page.notifications.length) {
-      await store.put(page.notifications);
-      cursor = page.notifications.at(-1).id;
-      await store.setMeta("cursor", cursor);
-    }
-    if (!page.next) break;
-  }
-  // Messages that arrived by push while the full-text fetch failed.
-  for (const m of await store.all()) {
-    if (!m.partial || Date.now() - m.created_at > RETENTION_MS) continue;
-    const full = await api(`/api/notifications/${m.id}`).catch(() => null);
-    if (full) await store.put([full]);
-  }
-}
+const sync = () => communicator.sync();
 
 async function refreshCatalog() {
   try {
@@ -1061,12 +988,7 @@ async function renderDiagnostics() {
 // Signing out must also stop this device receiving the account's pushes, and
 // must not leave the account's messages behind for the next person.
 async function forgetThisDevice() {
-  const id = localStorage.getItem("device_id");
-  if (id) await del(`/api/devices/${id}`).catch(() => {});
-  localStorage.removeItem("device_id");
-  localStorage.removeItem("reconciled_at");
-  const reg = await navigator.serviceWorker?.getRegistration();
-  await (await reg?.pushManager.getSubscription())?.unsubscribe().catch(() => {});
+  await communicator.forgetDevice();
   await store.clear();
   await store.updateBadge().catch(() => {});
 }

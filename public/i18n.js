@@ -214,7 +214,7 @@ const STRINGS = {
     keyPrefix: (p) => `key ${p}…`,
     subscribers: (n) => `${n} linked`,
     platformStats: (p) =>
-      `Linked users by device: ${p.iphone} iPhone · ${p.android} Android · ${p.other} other · ${p.none} no device`,
+      `Linked users by device: ${p.iphone} iPhone · ${p.android} Android · ${p.other} other · ${p.none} no device · ${p.app ?? 0} in the ivrit.ai app`,
     codeStats: (c, since) =>
       `Link codes since ${since}: ${c.created} created · ${c.linked} linked · ${c.unused} never used · ${c.tried_expired} tried after expiring · ${c.replaced} replaced`,
     disabled: "disabled",
@@ -502,7 +502,7 @@ const STRINGS = {
     keyPrefix: (p) => `מפתח ${p}…`,
     subscribers: (n) => `${n} מקושרים`,
     platformStats: (p) =>
-      `מקושרים לפי מכשיר: ${p.iphone} אייפון · ${p.android} אנדרואיד · ${p.other} אחר · ${p.none} ללא מכשיר`,
+      `מקושרים לפי מכשיר: ${p.iphone} אייפון · ${p.android} אנדרואיד · ${p.other} אחר · ${p.none} ללא מכשיר · ${p.app ?? 0} באפליקציית ivrit.ai`,
     codeStats: (c, since) =>
       `קודי קישור מאז ${since}: ${c.created} נוצרו · ${c.linked} קושרו · ${c.unused} לא נוצלו · ${c.tried_expired} נשלחו אחרי שפג תוקפם · ${c.replaced} הוחלפו`,
     disabled: "מושבת",
