@@ -20,6 +20,8 @@ export const LIMITS = {
   anonymous: { perMinute: 5 / 60, burst: 5 },
   // Link codes, per user: plenty for retrying, useless for grinding.
   linkCode: { perMinute: 1, burst: 10 },
+  // Redeeming an app sign-in: a code is 256 bits, so this only stops noise.
+  handoff: { perMinute: 10, burst: 10 },
 };
 
 // Bounded so a flood of distinct keys cannot grow the map without limit.

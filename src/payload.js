@@ -20,7 +20,7 @@ function truncateBytes(text, maxBytes) {
   return buf.subarray(0, end).toString();
 }
 
-export function buildPayload(row, { stub = false } = {}) {
+export function buildPayload(row, { stub = false, maxBytes = MAX_PAYLOAD_BYTES } = {}) {
   const payload = {
     i: row.notification_id,
     d: String(row.device_id),
@@ -40,16 +40,16 @@ export function buildPayload(row, { stub = false } = {}) {
   }
 
   let encoded = JSON.stringify(payload);
-  if (!stub && payload.b && Buffer.byteLength(encoded) > MAX_PAYLOAD_BYTES) {
+  if (!stub && payload.b && Buffer.byteLength(encoded) > maxBytes) {
     payload.x = 1;
     // JSON escaping can make the encoded body longer than the text itself, so
     // measure the result rather than trusting the arithmetic once.
-    let budget = Buffer.byteLength(payload.b) - (Buffer.byteLength(JSON.stringify(payload)) - MAX_PAYLOAD_BYTES) - 3;
+    let budget = Buffer.byteLength(payload.b) - (Buffer.byteLength(JSON.stringify(payload)) - maxBytes) - 3;
     for (;;) {
       payload.b = truncateBytes(row.body, budget) + "…";
       encoded = JSON.stringify(payload);
-      if (Buffer.byteLength(encoded) <= MAX_PAYLOAD_BYTES || budget <= 0) break;
-      budget -= Buffer.byteLength(encoded) - MAX_PAYLOAD_BYTES;
+      if (Buffer.byteLength(encoded) <= maxBytes || budget <= 0) break;
+      budget -= Buffer.byteLength(encoded) - maxBytes;
     }
   }
   return encoded;

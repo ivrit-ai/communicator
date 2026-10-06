@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash, randomBytes } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import {
   ADMIN_EMAIL,
@@ -6,7 +7,9 @@ import {
   createUser,
   decrypt,
   freshDatabase,
+  openFcm,
   startApp,
+  startFcmService,
   startPushService,
   stopDatabase,
   waitFor,
@@ -16,9 +19,11 @@ import { dropExpiredPartitions, ensurePartitions } from "../src/migrate.js";
 import { sweep } from "../src/maintenance.js";
 
 const APP_ORIGIN = "https://app.example.test";
+const APP_HANDOFF = "ai.example.app://auth";
 
 let pool;
 let push;
+let fcm;
 let app;
 let admin;
 
@@ -42,13 +47,20 @@ const ELIEZER = {
 before(async () => {
   pool = await freshDatabase();
   push = await startPushService();
-  app = await startApp({ APP_ORIGINS: APP_ORIGIN });
+  fcm = await startFcmService();
+  app = await startApp({
+    APP_ORIGINS: APP_ORIGIN,
+    APP_HANDOFF_URLS: APP_HANDOFF,
+    FCM_SERVICE_ACCOUNT: JSON.stringify(fcm.account),
+    FCM_API_BASE: fcm.origin,
+  });
   admin = await createUser(pool, { email: ADMIN_EMAIL });
 });
 
 after(async () => {
   await app?.stop();
   await push?.close();
+  await fcm?.close();
   await pool?.end();
   stopDatabase();
 });
@@ -486,6 +498,152 @@ describe("the API as a service for other ivrit.ai apps", () => {
     // No platform identity here, so it bounces to login, keeping the destination.
     assert.equal(res.status, 302);
     assert.ok(decodeURIComponent(res.headers.get("location")).includes(`next=${encodeURIComponent(`${APP_ORIGIN}/`)}`));
+  });
+});
+
+describe("the app on Android, through Firebase", () => {
+  const register = (user, body) =>
+    app.call("POST", "/api/devices", { cookie: user.cookie, origin: APP_ORIGIN, body: { transport: "fcm", ...body } });
+  const fcmToken = () => `fcm-${randomBytes(24).toString("base64url")}`;
+
+  it("sends sealed messages that only the device's own key opens", async () => {
+    const user = await createUser(pool);
+    const key = randomBytes(32);
+    const token = fcmToken();
+    const res = await register(user, { token, key: key.toString("base64url"), label: "ivrit.ai · Android" });
+    assert.equal(res.status, 201, res.text);
+    const list = await app.call("GET", "/api/devices", { cookie: user.cookie });
+    assert.deepEqual(
+      list.json.devices.map((d) => [d.client, d.transport]),
+      [["app", "fcm"]]
+    );
+
+    const before = fcm.received.length;
+    await app.call("POST", "/api/test", { cookie: user.cookie });
+    const message = await waitFor(() => fcm.received.slice(before).find((m) => m.token === token), { what: "fcm send" });
+    assert.equal(message.authorization, "Bearer test-access-token");
+    assert.equal(message.android.priority, "HIGH");
+    assert.deepEqual(Object.keys(message.data), ["p"]);
+    const payload = openFcm(message, key);
+    assert.ok(payload.t && !JSON.stringify(message).includes(payload.t), "nothing readable on the way");
+    assert.equal(payload.d, res.json.id);
+
+    // The ack works exactly as from a browser, and returns the full message.
+    const ack = await app.call("POST", "/api/ack", { origin: null, body: { i: payload.i, d: payload.d, k: payload.k } });
+    assert.equal(ack.json.first, true);
+    assert.equal(ack.json.notification.id, payload.i);
+  });
+
+  it("keeps long messages within Firebase's limit, and forgets unregistered tokens", async () => {
+    const user = await createUser(pool);
+    const key = randomBytes(32);
+    const token = fcmToken();
+    await register(user, { token, key: key.toString("base64url") });
+    const source = await createSource({ ...ELIEZER, id: "long", name: "Long" });
+    const minted = await app.call("POST", "/api/links", { cookie: user.cookie, body: { source_id: "long" } });
+    const linked = await app.call("POST", "/api/source/v1/links", {
+      bearer: source, origin: null, body: { code: minted.json.code, subject: "long-subject" },
+    });
+    const before = fcm.received.length;
+    await app.call("POST", "/api/source/v1/messages", {
+      bearer: source, origin: null, body: { subscription_id: linked.json.subscription_id, body: "תמלול ארוך. ".repeat(800) },
+    });
+    const message = await waitFor(() => fcm.received.slice(before).find((m) => m.token === token), { what: "long send" });
+    assert.ok(Buffer.byteLength(JSON.stringify(message.data)) <= 4096);
+    assert.equal(openFcm(message, key).x, 1);
+
+    fcm.respondWith((m) =>
+      m.token === token
+        ? { status: 404, body: { error: { status: "NOT_FOUND", details: [{ errorCode: "UNREGISTERED" }] } } }
+        : { status: 200, body: {} }
+    );
+    try {
+      await app.call("POST", "/api/test", { cookie: user.cookie });
+      await waitFor(async () => !(await pool.query("SELECT 1 FROM devices WHERE user_sub = $1", [user.sub])).rowCount, {
+        what: "device pruned",
+      });
+    } finally {
+      fcm.respondWith(() => ({ status: 200, body: {} }));
+    }
+  });
+
+  it("replaces a refreshed token, and refuses malformed registrations", async () => {
+    const user = await createUser(pool);
+    const key = randomBytes(32).toString("base64url");
+    const first = fcmToken();
+    await register(user, { token: first, key });
+    const second = fcmToken();
+    assert.equal((await register(user, { token: second, key, old_token: first })).status, 201);
+    const { rows } = await pool.query("SELECT endpoint FROM devices WHERE user_sub = $1", [user.sub]);
+    assert.deepEqual(rows.map((r) => r.endpoint), [second]);
+
+    assert.equal((await register(user, { token: fcmToken(), key: "short" })).json.error, "bad_key");
+    assert.equal((await register(user, { token: "x", key })).json.error, "bad_token");
+    // Web push rotation cannot touch a Firebase device.
+    const rotate = await app.call("POST", "/api/devices/rotate", {
+      origin: null,
+      body: { old_endpoint: second, subscription: { endpoint: `https://localhost:${push.port}/push/hijack`, keys: { p256dh: "x", auth: "y" } } },
+    });
+    assert.notEqual(rotate.json?.rotated, true);
+  });
+});
+
+describe("signing in to the app through the browser", () => {
+  const challengeOf = (verifier) => createHash("sha256").update(verifier).digest("base64url");
+  async function issue(user, verifier) {
+    const code = randomBytes(32).toString("base64url");
+    await pool.query(
+      "INSERT INTO handoff_codes (code_hash, user_sub, challenge, expires_at) VALUES ($1, $2, $3, now() + interval '2 minutes')",
+      [createHash("sha256").update(code).digest(), user.sub, challengeOf(verifier)]
+    );
+    return code;
+  }
+  const redeem = (body, cookie) => app.call("POST", "/auth/handoff", { origin: APP_ORIGIN, cookie, body });
+
+  it("keeps the hand-off through the login bounce, for allowed apps only", async () => {
+    const challenge = challengeOf(randomBytes(32).toString("base64url"));
+    const ok = await app.call("GET", `/auth/complete?handoff=${encodeURIComponent(APP_HANDOFF)}&challenge=${challenge}`);
+    const back = decodeURIComponent(new URL(ok.headers.get("location"), app.origin).searchParams.get("return_to"));
+    assert.equal(new URL(back, app.origin).searchParams.get("handoff"), APP_HANDOFF);
+    assert.equal(new URL(back, app.origin).searchParams.get("challenge"), challenge);
+
+    const evil = await app.call("GET", `/auth/complete?handoff=${encodeURIComponent("evil.app://auth")}&challenge=${challenge}`);
+    assert.ok(!decodeURIComponent(evil.headers.get("location")).includes("evil.app"));
+  });
+
+  it("signs the app in with the code and the right secret, once", async () => {
+    const user = await createUser(pool, { email: "handoff@example.com" });
+    const verifier = randomBytes(32).toString("base64url");
+
+    const wrong = await issue(user, verifier);
+    assert.equal((await redeem({ code: wrong, verifier: randomBytes(32).toString("base64url") })).status, 400);
+    // A wrong secret spends the code.
+    assert.equal((await redeem({ code: wrong, verifier })).status, 400);
+
+    const code = await issue(user, verifier);
+    const res = await redeem({ code, verifier });
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.headers.get("access-control-allow-origin"), APP_ORIGIN);
+    const session = /__Host-notifier_sess=([^;]+)/.exec(res.headers.get("set-cookie"))[1];
+    const me = await app.call("GET", "/api/me", { cookie: session });
+    assert.equal(me.json.sub, user.sub);
+    assert.equal((await redeem({ code, verifier })).status, 400);
+  });
+
+  it("turns the app's anonymous account into the signed-in one", async () => {
+    const user = await createUser(pool, { email: "upgrade@example.com" });
+    const anon = await createUser(pool, { kind: "anonymous" });
+    const device = await createDevice(pool, anon.sub, push);
+    const verifier = randomBytes(32).toString("base64url");
+    const res = await redeem({ code: await issue(user, verifier), verifier }, anon.cookie);
+    assert.equal(res.json.upgraded, true);
+    const { rows } = await pool.query("SELECT user_sub FROM devices WHERE id = $1", [device.id]);
+    assert.equal(rows[0].user_sub, user.sub);
+  });
+
+  it("refuses redemption from other sites", async () => {
+    const res = await app.call("POST", "/auth/handoff", { origin: "https://evil.example", body: { code: "x", verifier: "y".repeat(43) } });
+    assert.equal(res.status, 403);
   });
 });
 

@@ -14,6 +14,7 @@ import { linkRoutes } from "./src/routes/links.js";
 import { sourceApiRoutes } from "./src/routes/source-api.js";
 import { adminRoutes } from "./src/routes/admin.js";
 import { cors } from "./src/cors.js";
+import { fcmConfigured } from "./src/fcm.js";
 import { superviseSender } from "./src/supervise.js";
 import { startMaintenance } from "./src/maintenance.js";
 
@@ -86,7 +87,7 @@ app.get("/api/health", (req, res) => {
 });
 
 app.get("/api/config", (req, res) => {
-  res.json({ vapidPublicKey: VAPID_PUBLIC_KEY });
+  res.json({ vapidPublicKey: VAPID_PUBLIC_KEY, fcm: fcmConfigured() });
 });
 
 // Before the general parser, which then leaves these bodies alone: sources send

@@ -1,3 +1,4 @@
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Router } from "express";
 import { withTx } from "../db.js";
 import { verifyPlatformIdentity } from "../auth-platform.js";
@@ -18,6 +19,43 @@ import { allowedAppOrigin } from "../cors.js";
 const LOGIN = "/xhost-auth/login";
 const LOCALES = new Set(["en", "he"]);
 
+// Apps that sign in through the browser and take the result back (see
+// readHandoff): the exact addresses Communicator may hand a code to.
+const HANDOFF_TARGETS = new Set(
+  (process.env.APP_HANDOFF_URLS ?? "").split(",").map((u) => u.trim()).filter(Boolean)
+);
+const HANDOFF_TTL_SECONDS = 120;
+const CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
+const VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
+
+const sha256 = (value) => createHash("sha256").update(value).digest();
+
+// Google refuses to sign in inside an app's web view, so the ivrit.ai app
+// sends the user through the browser instead, with `handoff` (where to return)
+// and `challenge` (the hash of a secret only the app holds). Communicator then
+// hands back a one-time code instead of setting a cookie in the browser, and
+// the app redeems it, with the secret, from its own web view. Another app
+// claiming the same return address can catch the code but not redeem it.
+function readHandoff(query) {
+  const { handoff, challenge } = query;
+  if (typeof handoff !== "string" || !HANDOFF_TARGETS.has(handoff)) return null;
+  if (typeof challenge !== "string" || !CHALLENGE.test(challenge)) return null;
+  return { target: handoff, challenge };
+}
+
+const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+// Back to the app. A page rather than a bare redirect, so the button is there
+// if the browser will not leave for the app on its own.
+function handoffPage(url) {
+  const href = escapeHtml(url);
+  return `<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ivrit.ai</title>
+<style>body{font:17px/1.5 system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;text-align:center;padding:24px}a{display:inline-block;margin-top:12px;padding:12px 22px;border-radius:999px;background:#111;color:#fff;text-decoration:none}</style>
+<div><p>מחוברים. חוזרים לאפליקציה…<br><span lang="en" dir="ltr">Signed in. Returning to the app…</span></p><a href="${href}">חזרה לאפליקציה · Back to the app</a></div>
+<script>location.replace(${JSON.stringify(url).replace(/</g, "\\u003c")})</script></html>`;
+}
+
 // Where to land after signing in: a path here, or a page of an allowed
 // ivrit.ai app. Anything else is ignored, so this is never an open redirect.
 export function safeNext(next) {
@@ -33,6 +71,15 @@ export function safeNext(next) {
 
 function readLocale(value) {
   return typeof value === "string" && LOCALES.has(value) ? value : null;
+}
+
+async function upsertGoogleUser(client, identity) {
+  await client.query(
+    `INSERT INTO users (sub, email, name, kind) VALUES ($1, $2, $3, 'google')
+     ON CONFLICT (sub) DO UPDATE
+       SET email = EXCLUDED.email, name = EXCLUDED.name, last_seen_at = now()`,
+    [identity.sub, identity.email, identity.name]
+  );
 }
 
 export function authRoutes(pool) {
@@ -53,21 +100,38 @@ export function authRoutes(pool) {
       // Bounce to login once. Without the marker a permanently failing verify
       // (wrong host, clock skew) becomes an infinite redirect loop.
       if (req.query.retry) return res.status(401).type("text/plain").send("Sign-in failed.");
-      const nextParam = safeNext(req.query.next) ? `&next=${encodeURIComponent(req.query.next)}` : "";
-      const back = encodeURIComponent(`/auth/complete?retry=1${nextParam}`);
+      const params = new URLSearchParams({ retry: "1" });
+      if (safeNext(req.query.next)) params.set("next", req.query.next);
+      const handoff = readHandoff(req.query);
+      if (handoff) params.set("handoff", handoff.target), params.set("challenge", handoff.challenge);
+      const back = encodeURIComponent(`/auth/complete?${params}`);
       return res.redirect(302, `${LOGIN}?return_to=${back}`);
+    }
+
+    const handoff = readHandoff(req.query);
+    if (handoff) {
+      try {
+        const code = randomBytes(32).toString("base64url");
+        await withTx(pool, async (client) => {
+          await upsertGoogleUser(client, identity);
+          await client.query(
+            `INSERT INTO handoff_codes (code_hash, user_sub, challenge, expires_at)
+             VALUES ($1, $2, $3, now() + make_interval(secs => $4))`,
+            [sha256(code), identity.sub, handoff.challenge, HANDOFF_TTL_SECONDS]
+          );
+        });
+        const url = `${handoff.target}${handoff.target.includes("?") ? "&" : "?"}code=${code}`;
+        return res.set("Cache-Control", "no-store").type("html").send(handoffPage(url));
+      } catch (err) {
+        return next(err);
+      }
     }
 
     try {
       // Signing in from an anonymous session is an upgrade, not a switch.
       const before = await currentUser(pool, req);
       const token = await withTx(pool, async (client) => {
-        await client.query(
-          `INSERT INTO users (sub, email, name, kind) VALUES ($1, $2, $3, 'google')
-           ON CONFLICT (sub) DO UPDATE
-             SET email = EXCLUDED.email, name = EXCLUDED.name, last_seen_at = now()`,
-          [identity.sub, identity.email, identity.name]
-        );
+        await upsertGoogleUser(client, identity);
         if (before?.kind === "anonymous") await adoptAnonymous(client, before.sub, identity.sub);
         return createSession(client, identity.sub, req.get("user-agent"));
       });
@@ -77,6 +141,42 @@ export function authRoutes(pool) {
       const landing = safeNext(req.query.next);
       if (landing) return res.redirect(302, upgraded ? `${landing.split("#")[0]}#upgraded` : landing);
       res.redirect(302, upgraded ? "/#upgraded" : "/");
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // The app's half of the hand-off: a code from the browser, and the secret
+  // whose hash came with the sign-in. Single use either way; a wrong secret
+  // spends the code.
+  router.post("/auth/handoff", requireSameOrigin, async (req, res, next) => {
+    const { allowed, retryAfter } = consume(`handoff:${req.ip}`, LIMITS.handoff);
+    if (!allowed) return rejectRateLimited(res, LIMITS.handoff, retryAfter);
+    const { code, verifier } = req.body ?? {};
+    if (typeof code !== "string" || code.length > 100 || typeof verifier !== "string" || !VERIFIER.test(verifier)) {
+      return res.status(400).json({ error: "malformed" });
+    }
+    try {
+      const { rows } = await pool.query(
+        "DELETE FROM handoff_codes WHERE code_hash = $1 AND expires_at > now() RETURNING user_sub, challenge",
+        [sha256(code)]
+      );
+      const expected = rows[0] && Buffer.from(rows[0].challenge);
+      const actual = Buffer.from(sha256(verifier).toString("base64url"));
+      if (!expected || expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+        return res.status(400).json({ error: "invalid_code" });
+      }
+      const userSub = rows[0].user_sub;
+      // As in /auth/complete: an anonymous account in the app becomes this one.
+      const before = await currentUser(pool, req);
+      const upgraded = before?.kind === "anonymous" && before.sub !== userSub;
+      const token = await withTx(pool, async (client) => {
+        if (upgraded) await adoptAnonymous(client, before.sub, userSub);
+        return createSession(client, userSub, req.get("user-agent"));
+      });
+      if (!upgraded) await destroySession(pool, req).catch(() => {});
+      setSessionCookie(res, token);
+      res.json({ ok: true, upgraded });
     } catch (err) {
       next(err);
     }

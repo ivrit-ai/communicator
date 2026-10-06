@@ -2,8 +2,9 @@
 // server as a child process, and a local HTTPS push service that records (and
 // can decrypt) what the sender delivers.
 import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { createECDH, createHash, randomBytes } from "node:crypto";
+import { createDecipheriv, createECDH, createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
+import http from "node:http";
 import https from "node:https";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -183,6 +184,57 @@ export async function createUser(pool, { sub, email = null, kind = "google", loc
 
 // A device whose push endpoint is the local push service, with real keys so
 // its pushes can be decrypted.
+// A stand-in for Firebase: an OAuth token endpoint and the send API, with a
+// service account pointing at them. Messages are recorded, decrypted by the
+// test with the device's own key.
+export async function startFcmService() {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const received = [];
+  let respond = () => ({ status: 200, body: { name: "projects/test/messages/1" } });
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      const body = Buffer.concat(chunks).toString();
+      let out;
+      if (req.url === "/token") {
+        out = { status: 200, body: { access_token: "test-access-token", expires_in: 3600 } };
+      } else {
+        const message = { path: req.url, authorization: req.headers.authorization, ...JSON.parse(body).message };
+        received.push(message);
+        out = respond(message);
+      }
+      res.writeHead(out.status, { "content-type": "application/json" });
+      res.end(JSON.stringify(out.body));
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  return {
+    origin,
+    account: {
+      project_id: "test",
+      client_email: "sender@test.iam.gserviceaccount.com",
+      private_key: privateKey.export({ type: "pkcs8", format: "pem" }),
+      token_uri: `${origin}/token`,
+    },
+    received,
+    respondWith(fn) {
+      respond = fn;
+    },
+    close: () => new Promise((r) => server.close(r)),
+  };
+}
+
+// What the app does with a Firebase message: open the sealed payload with the
+// key it registered.
+export function openFcm(message, key) {
+  const sealed = Buffer.from(message.data.p, "base64");
+  const decipher = createDecipheriv("aes-256-gcm", key, sealed.subarray(0, 12));
+  decipher.setAuthTag(sealed.subarray(sealed.length - 16));
+  return JSON.parse(Buffer.concat([decipher.update(sealed.subarray(12, sealed.length - 16)), decipher.final()]).toString());
+}
+
 export async function createDevice(pool, userSub, push, { userAgent = null } = {}) {
   const ecdh = createECDH("prime256v1");
   ecdh.generateKeys();

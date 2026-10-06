@@ -2,6 +2,7 @@ import https from "node:https";
 import webpush from "web-push";
 import { createPool } from "./db.js";
 import { buildPayload } from "./payload.js";
+import { FCM_MAX_PAYLOAD_BYTES, fcmConfigured, sendFcm, tokenGone } from "./fcm.js";
 
 const CONCURRENCY = Number(process.env.SENDER_CONCURRENCY ?? 32);
 const LEASE = "60 seconds";
@@ -85,7 +86,7 @@ async function claim(limit) {
      )
      SELECT l.created_at, l.notification_id, l.device_id, l.attempts, l.last_status,
             n.source, n.title, n.body, n.url, n.source_id, n.subtitle, n.lang,
-            dev.endpoint, dev.p256dh, dev.auth
+            dev.endpoint, dev.p256dh, dev.auth, dev.transport, dev.secret
        FROM leased l
        JOIN notifications n
          ON n.created_at = l.created_at AND n.id = l.notification_id
@@ -155,6 +156,8 @@ async function send(row) {
     return;
   }
 
+  if (row.transport === "fcm") return sendViaFcm(row);
+
   const origin = new URL(row.endpoint).origin;
   if (breakerOpen(origin)) {
     await retryLater(row, row.last_status, "breaker_open", BREAKER_COOLDOWN_MS);
@@ -219,6 +222,53 @@ async function send(row) {
 
     if (status >= 500 || status === undefined) recordFailure(origin);
     await retryLater(row, status, String(err.body ?? err));
+  }
+}
+
+// The ivrit.ai app's Android devices. Same outcomes as web push, in
+// Firebase's terms: accepted is sent, an unregistered token removes the
+// device, and throttling or an outage backs off.
+const FCM = "fcm";
+
+async function sendViaFcm(row) {
+  if (!fcmConfigured()) {
+    await retryLater(row, null, "fcm_not_configured");
+    return;
+  }
+  if (breakerOpen(FCM)) {
+    await retryLater(row, row.last_status, "breaker_open", BREAKER_COOLDOWN_MS);
+    return;
+  }
+  const payload = buildPayload(row, { maxBytes: FCM_MAX_PAYLOAD_BYTES });
+  try {
+    const status = await sendFcm({ token: row.endpoint, secret: row.secret, payload, ttlSeconds: TTL_SECONDS });
+    recordSuccess(FCM);
+    await markSent(row, status);
+  } catch (err) {
+    const status = err.statusCode;
+    if (tokenGone(err)) {
+      recordSuccess(FCM);
+      await deleteDevice(row.device_id);
+      await markFailed(row, status, "token_gone");
+      return;
+    }
+    if (status === 401 || status === 403) {
+      // The service account is wrong or lacks the role: every send fails.
+      logErr({ msg: "fcm_FAIL_auth", status, err: err.body ?? String(err) });
+      await retryLater(row, status, "fcm_auth");
+      return;
+    }
+    if (status === 429) {
+      recordFailure(FCM, retryAfterMs(err.headers) ?? BREAKER_COOLDOWN_MS);
+      await retryLater(row, status, "rate_limited", retryAfterMs(err.headers));
+      return;
+    }
+    if (row.attempts >= MAX_ATTEMPTS) {
+      await markFailed(row, status, err.body ?? String(err));
+      return;
+    }
+    if (status >= 500 || status === undefined) recordFailure(FCM);
+    await retryLater(row, status, err.body ?? String(err));
   }
 }
 

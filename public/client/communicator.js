@@ -77,6 +77,26 @@ export function createCommunicator({ base = "", client = "web", store, serviceWo
     return id;
   }
 
+  // The ivrit.ai app's native shells register a push token of their own
+  // (Firebase on Android) with the AES key messages are sealed with, instead
+  // of a web push subscription.
+  async function registerNativeDevice({ transport, token, key, oldToken, label }) {
+    const { id } = await post("/api/devices", { transport, token, key, old_token: oldToken, label, client });
+    localStorage.setItem("device_id", id);
+    localStorage.setItem("reconciled_at", String(Date.now()));
+    return id;
+  }
+
+  // Signing in from an app's web view, where Google refuses to: the browser
+  // signs in and hands the app a one-time code for `target`, redeemable only
+  // with the verifier whose S256 hash is `challenge`.
+  function handoffLoginUrl(target, challenge) {
+    const complete = `/auth/complete?handoff=${encodeURIComponent(target)}&challenge=${challenge}`;
+    return `${base}/xhost-auth/login?return_to=${encodeURIComponent(complete)}`;
+  }
+
+  const redeemHandoff = (code, verifier) => post("/auth/handoff", { code, verifier });
+
   // Stops this browser receiving the account's pushes.
   async function forgetDevice() {
     const id = localStorage.getItem("device_id");
@@ -115,5 +135,19 @@ export function createCommunicator({ base = "", client = "web", store, serviceWo
     return `${base}/xhost-auth/login?return_to=${encodeURIComponent(complete)}`;
   }
 
-  return { api, post, patch, del, registerDevice, forgetDevice, sync, loginUrl, base, client };
+  return {
+    api,
+    post,
+    patch,
+    del,
+    registerDevice,
+    registerNativeDevice,
+    forgetDevice,
+    sync,
+    loginUrl,
+    handoffLoginUrl,
+    redeemHandoff,
+    base,
+    client,
+  };
 }

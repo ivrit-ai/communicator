@@ -38,6 +38,7 @@ export async function sweep(pool) {
       );
       const dedupe = await client.query("DELETE FROM dedupe WHERE expires_at < now()");
       const sessions = await client.query("DELETE FROM sessions WHERE expires_at < now()");
+      await client.query("DELETE FROM handoff_codes WHERE expires_at < now()");
       const devices = await client.query(
         `DELETE FROM devices WHERE last_seen_at < now() - make_interval(days => $1)`,
         [DEVICE_IDLE_DAYS]

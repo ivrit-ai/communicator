@@ -182,6 +182,25 @@ ALTER TABLE notifications ADD COLUMN IF NOT EXISTS subscription_id text;
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS subtitle text;
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS kind text;
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS lang text;
+
+-- Devices reached through a native push service rather than web push: the
+-- ivrit.ai app on Android, through Firebase ("fcm"). endpoint holds the
+-- service's device token, and secret the device's own AES key, so the push
+-- service relays messages it cannot read. Web push keys do not apply to them.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS transport text NOT NULL DEFAULT 'webpush';
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS secret bytea;
+ALTER TABLE devices ALTER COLUMN p256dh DROP NOT NULL;
+ALTER TABLE devices ALTER COLUMN auth DROP NOT NULL;
+
+-- Signing in from an app whose web view Google refuses: the sign-in runs in
+-- the browser, which hands the app a one-time code, redeemable only with the
+-- verifier whose hash the app sent in advance (as in OAuth's PKCE).
+CREATE TABLE IF NOT EXISTS handoff_codes (
+  code_hash  bytea PRIMARY KEY,
+  user_sub   text NOT NULL REFERENCES users(sub) ON DELETE CASCADE,
+  challenge  text NOT NULL,
+  expires_at timestamptz NOT NULL
+);
 `;
 
 function dayKey(d) {
