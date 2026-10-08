@@ -192,6 +192,11 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS secret bytea;
 ALTER TABLE devices ALTER COLUMN p256dh DROP NOT NULL;
 ALTER TABLE devices ALTER COLUMN auth DROP NOT NULL;
 
+-- The Google account id of an app that signs in with Google itself (see
+-- auth-google.js), when it differs from the id this site's login recorded.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub text;
+CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_idx ON users (google_sub) WHERE google_sub IS NOT NULL;
+
 -- Signing in from an app whose web view Google refuses: the sign-in runs in
 -- the browser, which hands the app a one-time code, redeemable only with the
 -- verifier whose hash the app sent in advance (as in OAuth's PKCE).

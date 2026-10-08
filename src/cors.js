@@ -24,7 +24,8 @@ export function cors(req, res, next) {
   res.append("Vary", "Origin");
   if (req.method === "OPTIONS") {
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE");
-    res.setHeader("Access-Control-Allow-Headers", "content-type");
+    // authorization: the ivrit.ai app signs its requests with a Google token.
+    res.setHeader("Access-Control-Allow-Headers", "content-type, authorization");
     res.setHeader("Access-Control-Max-Age", "600");
     return res.status(204).end();
   }

@@ -6,6 +6,8 @@
 // `base` is "" on communicator.ivrit.ai itself and the API's origin
 // elsewhere; cookies then travel with every request (same site: *.ivrit.ai).
 // `client` tells the server which app a device belongs to ("web" or "app").
+// `token`, for an app that signs in with Google itself: a function resolving to
+// the current Google ID token, sent as a bearer on every request, with no cookies.
 
 const FIRST_ULID = "0".repeat(26);
 const RETENTION_MS = 3 * 86_400_000;
@@ -33,12 +35,16 @@ export function deviceLabel() {
   return `${browser} · ${os}`;
 }
 
-export function createCommunicator({ base = "", client = "web", store, serviceWorker = "/sw.js" } = {}) {
-  const credentials = base ? "include" : "same-origin";
+export function createCommunicator({ base = "", client = "web", store, serviceWorker = "/sw.js", token = null } = {}) {
+  const credentials = token ? "omit" : base ? "include" : "same-origin";
 
   async function api(path, options = {}) {
     const headers = { ...options.headers };
     if (options.body && !headers["content-type"]) headers["content-type"] = "application/json";
+    if (token) {
+      const bearer = await token();
+      if (bearer) headers.authorization = `Bearer ${bearer}`;
+    }
     const res = await fetch(base + path, { credentials, ...options, headers });
     if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => ({})));
     return res.status === 204 ? null : res.json();

@@ -7,6 +7,7 @@ import {
   createSession,
   currentUser,
   destroySession,
+  forgetCachedUser,
   isAdmin,
   requireSameOrigin,
   requireSession,
@@ -219,6 +220,7 @@ export function authRoutes(pool) {
   router.delete("/api/me", requireSession(pool), requireSameOrigin, async (req, res, next) => {
     try {
       await withTx(pool, (client) => deleteAccount(client, req.user.sub));
+      forgetCachedUser(req.user.sub);
       clearSessionCookie(res);
       res.json({ ok: true });
     } catch (err) {

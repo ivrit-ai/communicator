@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import {
   ADMIN_EMAIL,
@@ -10,6 +10,7 @@ import {
   openFcm,
   startApp,
   startFcmService,
+  startGoogleService,
   startPushService,
   stopDatabase,
   waitFor,
@@ -20,10 +21,12 @@ import { sweep } from "../src/maintenance.js";
 
 const APP_ORIGIN = "https://app.example.test";
 const APP_HANDOFF = "ai.example.app://auth";
+const GOOGLE_CLIENT = "test-client.apps.googleusercontent.com";
 
 let pool;
 let push;
 let fcm;
+let google;
 let app;
 let admin;
 
@@ -48,7 +51,10 @@ before(async () => {
   pool = await freshDatabase();
   push = await startPushService();
   fcm = await startFcmService();
+  google = await startGoogleService();
   app = await startApp({
+    APP_GOOGLE_CLIENT_IDS: GOOGLE_CLIENT,
+    GOOGLE_JWKS_URL: google.jwksUrl,
     APP_ORIGINS: APP_ORIGIN,
     APP_HANDOFF_URLS: APP_HANDOFF,
     FCM_SERVICE_ACCOUNT: JSON.stringify(fcm.account),
@@ -61,6 +67,7 @@ after(async () => {
   await app?.stop();
   await push?.close();
   await fcm?.close();
+  await google?.close();
   await pool?.end();
   stopDatabase();
 });
@@ -644,6 +651,73 @@ describe("signing in to the app through the browser", () => {
   it("refuses redemption from other sites", async () => {
     const res = await app.call("POST", "/auth/handoff", { origin: "https://evil.example", body: { code: "x", verifier: "y".repeat(43) } });
     assert.equal(res.status, 403);
+  });
+});
+
+describe("the app signed in with Google itself", () => {
+  const bearer = (opts) => ({ authorization: `Bearer ${google.token({ aud: GOOGLE_CLIENT, ...opts })}` });
+  const as = (method, path, headers, body) =>
+    fetch(app.origin + path, {
+      method,
+      headers: { ...headers, ...(body ? { "content-type": "application/json" } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null), headers: r.headers }));
+
+  it("signs in a new Google account with its token alone, no cookie and no origin", async () => {
+    const res = await as("GET", "/api/me", bearer({ sub: "google-new-1", email: "new1@example.com", name: "New One" }));
+    assert.equal(res.status, 200);
+    assert.equal(res.json.kind, "google");
+    assert.equal(res.json.email, "new1@example.com");
+    const device = await as("POST", "/api/devices", bearer({ sub: "google-new-1", email: "new1@example.com" }), {
+      transport: "fcm", token: `fcm-${randomBytes(24).toString("base64url")}`, key: randomBytes(32).toString("base64url"),
+    });
+    assert.equal(device.status, 201, JSON.stringify(device.json));
+  });
+
+  it("finds the account this site's login made, by its verified email", async () => {
+    const existing = await createUser(pool, { email: "Mixed.Case@example.com" });
+    const res = await as("GET", "/api/me", bearer({ sub: "google-other-id", email: "mixed.case@example.com" }));
+    assert.equal(res.json.sub, existing.sub);
+    const { rows } = await pool.query("SELECT google_sub FROM users WHERE sub = $1", [existing.sub]);
+    assert.equal(rows[0].google_sub, "google-other-id");
+    // From then on by its Google id, whatever the address.
+    const again = await as("GET", "/api/me", bearer({ sub: "google-other-id", email: "renamed@example.com" }));
+    assert.equal(again.json.sub, existing.sub);
+  });
+
+  it("refuses tokens it should not trust", async () => {
+    const forged = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+    for (const [what, opts] of [
+      ["another app's", { aud: "someone-else" }],
+      ["another issuer's", { iss: "https://evil.example" }],
+      ["an expired", { ttl: -600 }],
+      ["an unverified email's", { verified: false }],
+      ["a forged", { key: forged }],
+    ]) {
+      const res = await as("GET", "/api/me", bearer({ sub: "google-x", email: "x@example.com", ...opts }));
+      assert.equal(res.status, 401, what);
+    }
+  });
+
+  it("lets the app link a source and run a test, from its own origin", async () => {
+    const headers = { ...bearer({ sub: "google-linker", email: "linker@example.com" }), origin: APP_ORIGIN };
+    await createSource({ ...ELIEZER, id: "bearer-src", name: "Bearer" });
+    const minted = await as("POST", "/api/links", headers, { source_id: "bearer-src" });
+    assert.equal(minted.status, 201, JSON.stringify(minted.json));
+    assert.equal(minted.headers.get("access-control-allow-origin"), APP_ORIGIN);
+    const pre = await fetch(`${app.origin}/api/links`, {
+      method: "OPTIONS",
+      headers: { origin: APP_ORIGIN, "access-control-request-method": "POST", "access-control-request-headers": "authorization,content-type" },
+    });
+    assert.match(pre.headers.get("access-control-allow-headers"), /authorization/);
+  });
+
+  it("deletes the account, and the token no longer finds it", async () => {
+    const headers = bearer({ sub: "google-leaver", email: "leaver@example.com" });
+    const me = await as("GET", "/api/me", headers);
+    assert.equal((await as("DELETE", "/api/me", headers)).status, 200);
+    const { rowCount } = await pool.query("SELECT 1 FROM users WHERE sub = $1", [me.json.sub]);
+    assert.equal(rowCount, 0);
   });
 });
 

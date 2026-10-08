@@ -2,7 +2,7 @@
 // server as a child process, and a local HTTPS push service that records (and
 // can decrypt) what the sender delivers.
 import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { createDecipheriv, createECDH, createHash, generateKeyPairSync, randomBytes } from "node:crypto";
+import { createDecipheriv, createECDH, createHash, createSign, generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
@@ -221,6 +221,30 @@ export async function startFcmService() {
     received,
     respondWith(fn) {
       respond = fn;
+    },
+    close: () => new Promise((r) => server.close(r)),
+  };
+}
+
+// A stand-in for Google's sign-in keys: its JWKS served locally, and ID tokens
+// minted here as Google would issue them to an app.
+export async function startGoogleService() {
+  const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const jwk = { ...publicKey.export({ format: "jwk" }), kid: "test-kid", alg: "RS256", use: "sig" };
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ keys: [jwk] }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const part = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return {
+    jwksUrl: `http://127.0.0.1:${server.address().port}/certs`,
+    token({ sub, email, aud, iss = "https://accounts.google.com", ttl = 3600, verified = true, name = null, key = privateKey }) {
+      const now = Math.floor(Date.now() / 1000);
+      const unsigned = `${part({ alg: "RS256", typ: "JWT", kid: "test-kid" })}.${part({
+        iss, aud, sub, email, email_verified: verified, name, iat: now, exp: now + ttl,
+      })}`;
+      return `${unsigned}.${createSign("RSA-SHA256").update(unsigned).sign(key, "base64url")}`;
     },
     close: () => new Promise((r) => server.close(r)),
   };
