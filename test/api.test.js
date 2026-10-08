@@ -55,6 +55,8 @@ before(async () => {
   app = await startApp({
     APP_GOOGLE_CLIENT_IDS: GOOGLE_CLIENT,
     GOOGLE_JWKS_URL: google.jwksUrl,
+    APP_TOKEN_ISSUER: APP_ORIGIN,
+    APP_TOKEN_JWKS_URL: google.jwksUrl,
     APP_ORIGINS: APP_ORIGIN,
     APP_HANDOFF_URLS: APP_HANDOFF,
     FCM_SERVICE_ACCOUNT: JSON.stringify(fcm.account),
@@ -655,6 +657,7 @@ describe("signing in to the app through the browser", () => {
 });
 
 describe("the app signed in with Google itself", () => {
+  const googleStandIn = { token: (opts) => google.token(opts) };
   const bearer = (opts) => ({ authorization: `Bearer ${google.token({ aud: GOOGLE_CLIENT, ...opts })}` });
   const as = (method, path, headers, body) =>
     fetch(app.origin + path, {
@@ -710,6 +713,17 @@ describe("the app signed in with Google itself", () => {
       headers: { origin: APP_ORIGIN, "access-control-request-method": "POST", "access-control-request-headers": "authorization,content-type" },
     });
     assert.match(pre.headers.get("access-control-allow-headers"), /authorization/);
+  });
+
+  it("accepts the app's own session for the same account, and not one meant for others", async () => {
+    const google = await as("GET", "/api/me", bearer({ sub: "google-session", email: "session@example.com" }));
+    const session = (opts) => ({ authorization: `Bearer ${googleStandIn.token({ iss: APP_ORIGIN, aud: "ivrit-app", sub: "google-session", email: "session@example.com", ...opts })}` });
+    const viaSession = await as("GET", "/api/me", session({}));
+    assert.equal(viaSession.status, 200);
+    assert.equal(viaSession.json.sub, google.json.sub);
+    assert.equal((await as("GET", "/api/me", session({ aud: "someone-else" }))).status, 401);
+    assert.equal((await as("GET", "/api/me", session({ ttl: -600 }))).status, 401);
+    assert.equal((await as("GET", "/api/me", session({ iss: "https://evil.example" }))).status, 401);
   });
 
   it("deletes the account, and the token no longer finds it", async () => {
