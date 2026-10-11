@@ -19,7 +19,9 @@ their WhatsApp number once, and Eliezer's transcripts arrive here instead of in 
 - **Personal tokens.** "Scripts & API" tokens let your own scripts send you notifications
   with a single `POST /api/notify`.
 - **Delivery.** Web Push (VAPID) to every registered device, from a separate sender process
-  with retries. The server keeps messages for three days; each device keeps its own copy
+  with retries. The ivrit.ai app's devices are reached through Firebase (Android) and Apple's
+  push service (iPhone) instead, each message sealed with the device's own key so neither
+  service can read it (`src/fcm.js`, `src/apns.js`). The server keeps messages for three days; each device keeps its own copy
   (IndexedDB), and the full text of a long message is fetched with the delivery ack.
 - **UI.** Vanilla JS, no build step, in `public/`: Hebrew and English, light and dark.
 
@@ -42,6 +44,11 @@ Generate VAPID keys with `npx web-push generate-vapid-keys`. Optional:
 `NOTIFY_RATE_PER_MINUTE` (per personal token, default 120) and `SENDER_CONCURRENCY`
 (default 32).
 
+The app's push services, each optional (without one, its devices cannot register):
+`FCM_SERVICE_ACCOUNT` (the Firebase service account's JSON key) for Android; for iPhone,
+`APNS_KEY` (the `.p8` key's contents), `APNS_KEY_ID`, `APNS_TEAM_ID` and `APNS_TOPIC` (the
+app's bundle id, default `ai.ivrit.app`).
+
 ## Tests
 
 ```bash
@@ -49,7 +56,8 @@ npm test
 ```
 
 Starts a throwaway Postgres in Docker (or uses `TEST_DATABASE_URL`), the real server, and a
-local HTTPS push service that decrypts what the sender delivers.
+local HTTPS push service that decrypts what the sender delivers, with stand-ins for Firebase
+and Apple's push service.
 
 ## Deploying
 

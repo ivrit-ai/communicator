@@ -2,9 +2,10 @@
 // server as a child process, and a local HTTPS push service that records (and
 // can decrypt) what the sender delivers.
 import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { createDecipheriv, createECDH, createHash, createSign, generateKeyPairSync, randomBytes } from "node:crypto";
+import { createDecipheriv, createECDH, createHash, createSign, generateKeyPairSync, randomBytes, verify } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import http from "node:http";
+import http2 from "node:http2";
 import https from "node:https";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -226,6 +227,62 @@ export async function startFcmService() {
   };
 }
 
+// A stand-in for Apple's push service: HTTP/2 without TLS, recording each
+// message with its headers. The provider key is made here, so the test can
+// check the sender's token with its public half.
+export async function startApnsService() {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const received = [];
+  let respond = () => ({ status: 200 });
+  const server = http2.createServer();
+  const sessions = new Set();
+  server.on("session", (s) => {
+    sessions.add(s);
+    s.on("close", () => sessions.delete(s));
+  });
+  server.on("stream", (stream, headers) => {
+    const chunks = [];
+    stream.on("data", (c) => chunks.push(c));
+    stream.on("end", () => {
+      const message = {
+        path: headers[":path"],
+        token: headers[":path"].split("/").pop(),
+        headers,
+        body: JSON.parse(Buffer.concat(chunks).toString()),
+      };
+      received.push(message);
+      const out = respond(message);
+      stream.respond({ ":status": out.status, ...(out.body ? { "content-type": "application/json" } : {}) });
+      stream.end(out.body ? JSON.stringify(out.body) : undefined);
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return {
+    origin: `http://127.0.0.1:${server.address().port}`,
+    key: privateKey.export({ type: "pkcs8", format: "pem" }),
+    keyId: "TESTKEY123",
+    teamId: "TESTTEAM12",
+    received,
+    respondWith(fn) {
+      respond = fn;
+    },
+    // The provider token's claims, if its signature is the key's; null otherwise.
+    verify(authorization) {
+      const [header, claims, signature] = authorization.replace(/^bearer /, "").split(".");
+      const ok = verify("sha256", Buffer.from(`${header}.${claims}`), { key: publicKey, dsaEncoding: "ieee-p1363" },
+        Buffer.from(signature, "base64url"));
+      if (!ok) return null;
+      return { header: JSON.parse(Buffer.from(header, "base64url")), claims: JSON.parse(Buffer.from(claims, "base64url")) };
+    },
+    close: () =>
+      new Promise((r) => {
+        server.close(r);
+        // Open sessions from the sender would otherwise hold close() up.
+        for (const s of sessions) s.destroy();
+      }),
+  };
+}
+
 // A stand-in for Google's sign-in keys: its JWKS served locally, and ID tokens
 // minted here as Google would issue them to an app.
 export async function startGoogleService() {
@@ -253,7 +310,16 @@ export async function startGoogleService() {
 // What the app does with a Firebase message: open the sealed payload with the
 // key it registered.
 export function openFcm(message, key) {
-  const sealed = Buffer.from(message.data.p, "base64");
+  return openSealed(message.data.p, key);
+}
+
+// The same for Apple: the iPhone's Notification Service Extension opens "p".
+export function openApns(message, key) {
+  return openSealed(message.body.p, key);
+}
+
+function openSealed(field, key) {
+  const sealed = Buffer.from(field, "base64");
   const decipher = createDecipheriv("aes-256-gcm", key, sealed.subarray(0, 12));
   decipher.setAuthTag(sealed.subarray(sealed.length - 16));
   return JSON.parse(Buffer.concat([decipher.update(sealed.subarray(12, sealed.length - 16)), decipher.final()]).toString());

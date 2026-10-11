@@ -2,18 +2,22 @@ import { Router } from "express";
 import { requireSameOrigin, requireSession } from "../auth-session.js";
 import { hashEndpoint, validateSubscription } from "../push-endpoint.js";
 import { fcmConfigured } from "../fcm.js";
+import { apnsConfigured, apnsEndpoint } from "../apns.js";
 
 const MAX_LABEL = 64;
 const FCM_TOKEN = /^[A-Za-z0-9:_-]{20,4096}$/;
+// An APNs device token, as the app sends it: lowercase hex.
+const APNS_TOKEN = /^[0-9a-f]{64,200}$/;
 
-// A device of the ivrit.ai app on Android: its Firebase token, and the AES-256
-// key it generated for itself, which messages are sealed with (see fcm.js).
-function readFcm(body) {
+// A device of the ivrit.ai app: its push service's token (Firebase on Android,
+// Apple's on iPhone), and the AES-256 key it generated for itself, which
+// messages are sealed with (see fcm.js).
+function readNative(body, pattern) {
   const token = body?.token;
-  if (typeof token !== "string" || !FCM_TOKEN.test(token)) return { error: "bad_token" };
+  if (typeof token !== "string" || !pattern.test(token)) return { error: "bad_token" };
   const secret = typeof body?.key === "string" ? Buffer.from(body.key, "base64url") : null;
   if (!secret || secret.length !== 32 || secret.toString("base64url") !== body.key) return { error: "bad_key" };
-  const old = typeof body?.old_token === "string" && FCM_TOKEN.test(body.old_token) ? body.old_token : null;
+  const old = typeof body?.old_token === "string" && pattern.test(body.old_token) ? body.old_token : null;
   return { token, secret, old };
 }
 
@@ -79,33 +83,53 @@ export function deviceRoutes(pool) {
       return res.status(400).json({ error: "label_too_long", limit: MAX_LABEL });
     }
 
-    if (req.body?.transport === "fcm") {
-      if (!fcmConfigured()) return res.status(503).json({ error: "fcm_unavailable" });
-      const fcm = readFcm(req.body);
-      if (fcm.error) return res.status(400).json({ error: fcm.error });
+    const transport = req.body?.transport;
+    if (transport === "fcm" || transport === "apns") {
+      const configured = transport === "fcm" ? fcmConfigured() : apnsConfigured();
+      if (!configured) return res.status(503).json({ error: `${transport}_unavailable` });
+      const native = readNative(req.body, transport === "fcm" ? FCM_TOKEN : APNS_TOKEN);
+      if (native.error) return res.status(400).json({ error: native.error });
+      // What the sender is handed: Firebase's token as it is; Apple's with the
+      // environment it belongs to (see apns.js).
+      let endpoint = (token) => token;
+      if (transport === "apns") {
+        const environment = req.body?.environment ?? "production";
+        if (environment !== "production" && environment !== "sandbox") {
+          return res.status(400).json({ error: "bad_environment" });
+        }
+        endpoint = (token) => apnsEndpoint(token, environment);
+      }
       try {
-        // Firebase replaces a device's token now and then; the app sends the
+        // Push services replace a device's token now and then; the app sends the
         // one it had, so the old row goes rather than lingering until a send
         // comes back unregistered.
-        if (fcm.old && fcm.old !== fcm.token) {
+        if (native.old && native.old !== native.token) {
           await pool.query("DELETE FROM devices WHERE endpoint_hash = $1 AND user_sub = $2", [
-            hashEndpoint(fcm.old),
+            hashEndpoint(endpoint(native.old)),
             req.user.sub,
           ]);
         }
         const { rows } = await pool.query(
           `INSERT INTO devices (user_sub, endpoint_hash, endpoint, transport, secret, label, user_agent, client)
-           VALUES ($1, $2, $3, 'fcm', $4, $5, $6, 'app')
+           VALUES ($1, $2, $3, $7, $4, $5, $6, 'app')
            ON CONFLICT (endpoint_hash) DO UPDATE
              SET user_sub = EXCLUDED.user_sub,
                  secret = EXCLUDED.secret,
-                 transport = 'fcm',
+                 transport = EXCLUDED.transport,
                  label = COALESCE(EXCLUDED.label, devices.label),
                  user_agent = EXCLUDED.user_agent,
                  client = 'app',
                  last_seen_at = now()
            RETURNING id, (xmax = 0) AS created`,
-          [req.user.sub, hashEndpoint(fcm.token), fcm.token, fcm.secret, label, req.get("user-agent")?.slice(0, 500) ?? null]
+          [
+            req.user.sub,
+            hashEndpoint(endpoint(native.token)),
+            endpoint(native.token),
+            native.secret,
+            label,
+            req.get("user-agent")?.slice(0, 500) ?? null,
+            transport,
+          ]
         );
         return res.status(rows[0].created ? 201 : 200).json({ id: String(rows[0].id) });
       } catch (err) {

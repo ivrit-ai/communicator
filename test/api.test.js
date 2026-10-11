@@ -7,7 +7,9 @@ import {
   createUser,
   decrypt,
   freshDatabase,
+  openApns,
   openFcm,
+  startApnsService,
   startApp,
   startFcmService,
   startGoogleService,
@@ -26,6 +28,8 @@ const GOOGLE_CLIENT = "test-client.apps.googleusercontent.com";
 let pool;
 let push;
 let fcm;
+let apns;
+let apnsSandbox;
 let google;
 let app;
 let admin;
@@ -51,6 +55,8 @@ before(async () => {
   pool = await freshDatabase();
   push = await startPushService();
   fcm = await startFcmService();
+  apns = await startApnsService();
+  apnsSandbox = await startApnsService();
   google = await startGoogleService();
   app = await startApp({
     APP_GOOGLE_CLIENT_IDS: GOOGLE_CLIENT,
@@ -61,6 +67,11 @@ before(async () => {
     APP_HANDOFF_URLS: APP_HANDOFF,
     FCM_SERVICE_ACCOUNT: JSON.stringify(fcm.account),
     FCM_API_BASE: fcm.origin,
+    APNS_KEY: apns.key,
+    APNS_KEY_ID: apns.keyId,
+    APNS_TEAM_ID: apns.teamId,
+    APNS_HOST: apns.origin,
+    APNS_SANDBOX_HOST: apnsSandbox.origin,
   });
   admin = await createUser(pool, { email: ADMIN_EMAIL });
 });
@@ -69,6 +80,8 @@ after(async () => {
   await app?.stop();
   await push?.close();
   await fcm?.close();
+  await apns?.close();
+  await apnsSandbox?.close();
   await google?.close();
   await pool?.end();
   stopDatabase();
@@ -594,6 +607,155 @@ describe("the app on Android, through Firebase", () => {
       body: { old_endpoint: second, subscription: { endpoint: `https://localhost:${push.port}/push/hijack`, keys: { p256dh: "x", auth: "y" } } },
     });
     assert.notEqual(rotate.json?.rotated, true);
+  });
+});
+
+describe("the app on iPhone, through Apple", () => {
+  const register = (user, body) =>
+    app.call("POST", "/api/devices", { cookie: user.cookie, origin: APP_ORIGIN, body: { transport: "apns", ...body } });
+  const apnsToken = () => randomBytes(32).toString("hex");
+  const sendTo = async (service, user, token, what) => {
+    const before = service.received.length;
+    await app.call("POST", "/api/test", { cookie: user.cookie });
+    return waitFor(() => service.received.slice(before).find((m) => m.token === token), { what });
+  };
+
+  it("sends alerts Apple cannot read, which only the device's own key opens", async () => {
+    const user = await createUser(pool);
+    const key = randomBytes(32);
+    const token = apnsToken();
+    const res = await register(user, { token, key: key.toString("base64url"), label: "ivrit.ai · iPhone" });
+    assert.equal(res.status, 201, res.text);
+    const list = await app.call("GET", "/api/devices", { cookie: user.cookie });
+    assert.deepEqual(
+      list.json.devices.map((d) => [d.client, d.transport]),
+      [["app", "apns"]]
+    );
+
+    const message = await sendTo(apns, user, token, "apns send");
+    assert.equal(message.path, `/3/device/${token}`);
+    assert.equal(message.headers[":method"], "POST");
+    assert.equal(message.headers["apns-topic"], "ai.ivrit.app");
+    assert.equal(message.headers["apns-push-type"], "alert");
+    assert.equal(message.headers["apns-priority"], "10");
+    assert.ok(Number(message.headers["apns-expiration"]) > Date.now() / 1000 + 86400);
+    const jwt = apns.verify(message.headers.authorization);
+    assert.ok(jwt, "the provider token is signed with the key");
+    assert.deepEqual(jwt.header, { alg: "ES256", kid: apns.keyId });
+    assert.equal(jwt.claims.iss, apns.teamId);
+    assert.ok(Math.abs(jwt.claims.iat - Date.now() / 1000) < 60);
+
+    assert.deepEqual(Object.keys(message.body).sort(), ["aps", "p"]);
+    assert.deepEqual(message.body.aps, {
+      alert: { "title-loc-key": "PUSH_TITLE", "loc-key": "PUSH_BODY" },
+      "mutable-content": 1,
+      sound: "default",
+    });
+    const payload = openApns(message, key);
+    assert.ok(payload.t && !JSON.stringify(message.body).includes(payload.t), "nothing readable on the way");
+    assert.equal(payload.d, res.json.id);
+    const ack = await app.call("POST", "/api/ack", { origin: null, body: { i: payload.i, d: payload.d, k: payload.k } });
+    assert.equal(ack.json.first, true);
+
+    // The provider token is reused, not made for every message.
+    const again = await sendTo(apns, user, token, "second apns send");
+    assert.equal(again.headers.authorization, message.headers.authorization);
+  });
+
+  it("reaches a development build through the sandbox", async () => {
+    const user = await createUser(pool);
+    const key = randomBytes(32);
+    const token = apnsToken();
+    const res = await register(user, { token, key: key.toString("base64url"), environment: "sandbox" });
+    assert.equal(res.status, 201, res.text);
+    const { rows } = await pool.query("SELECT endpoint FROM devices WHERE user_sub = $1", [user.sub]);
+    assert.deepEqual(rows.map((r) => r.endpoint), [`sandbox:${token}`]);
+    const message = await sendTo(apnsSandbox, user, token, "sandbox send");
+    assert.equal(openApns(message, key).d, res.json.id);
+    assert.ok(!apns.received.some((m) => m.token === token), "not through production");
+  });
+
+  it("keeps long messages within Apple's limit, and resends one too large as a stub", async () => {
+    const user = await createUser(pool);
+    const key = randomBytes(32);
+    const token = apnsToken();
+    await register(user, { token, key: key.toString("base64url") });
+    const source = await createSource({ ...ELIEZER, id: "long-ios", name: "Long" });
+    const minted = await app.call("POST", "/api/links", { cookie: user.cookie, body: { source_id: "long-ios" } });
+    const linked = await app.call("POST", "/api/source/v1/links", {
+      bearer: source, origin: null, body: { code: minted.json.code, subject: "long-ios-subject" },
+    });
+    const sendLong = () =>
+      app.call("POST", "/api/source/v1/messages", {
+        bearer: source, origin: null, body: { subscription_id: linked.json.subscription_id, body: "תמלול ארוך. ".repeat(800) },
+      });
+    let before = apns.received.length;
+    await sendLong();
+    const message = await waitFor(() => apns.received.slice(before).find((m) => m.token === token), { what: "long send" });
+    assert.ok(Buffer.byteLength(JSON.stringify(message.body)) <= 4096);
+    const long = openApns(message, key);
+    assert.equal(long.x, 1);
+    assert.ok(long.b);
+
+    let refused = 0;
+    apns.respondWith((m) => (m.token === token && !refused++ ? { status: 413, body: { reason: "PayloadTooLarge" } } : { status: 200 }));
+    try {
+      before = apns.received.length;
+      await sendLong();
+      const stub = await waitFor(() => apns.received.slice(before).filter((m) => m.token === token)[1], { what: "stub resend" });
+      const opened = openApns(stub, key);
+      assert.equal(opened.x, 1);
+      assert.equal(opened.b, undefined);
+    } finally {
+      apns.respondWith(() => ({ status: 200 }));
+    }
+  });
+
+  it("forgets a token Apple says is gone", async () => {
+    const user = await createUser(pool);
+    const token = apnsToken();
+    await register(user, { token, key: randomBytes(32).toString("base64url") });
+    apns.respondWith((m) => (m.token === token ? { status: 410, body: { reason: "Unregistered", timestamp: Date.now() } } : { status: 200 }));
+    try {
+      await app.call("POST", "/api/test", { cookie: user.cookie });
+      await waitFor(async () => !(await pool.query("SELECT 1 FROM devices WHERE user_sub = $1", [user.sub])).rowCount, {
+        what: "device pruned",
+      });
+    } finally {
+      apns.respondWith(() => ({ status: 200 }));
+    }
+  });
+
+  it("replaces a refreshed token, and refuses malformed registrations", async () => {
+    const user = await createUser(pool);
+    const key = randomBytes(32).toString("base64url");
+    const first = apnsToken();
+    await register(user, { token: first, key, environment: "sandbox" });
+    const second = apnsToken();
+    assert.equal((await register(user, { token: second, key, old_token: first, environment: "sandbox" })).status, 201);
+    const { rows } = await pool.query("SELECT endpoint FROM devices WHERE user_sub = $1", [user.sub]);
+    assert.deepEqual(rows.map((r) => r.endpoint), [`sandbox:${second}`]);
+
+    assert.equal((await register(user, { token: apnsToken(), key: "short" })).json.error, "bad_key");
+    assert.equal((await register(user, { token: "x", key })).json.error, "bad_token");
+    assert.equal((await register(user, { token: apnsToken().toUpperCase(), key })).json.error, "bad_token");
+    assert.equal((await register(user, { token: apnsToken(), key, environment: "staging" })).json.error, "bad_environment");
+  });
+
+  it("refuses iPhones where Apple is not configured", async () => {
+    const bare = await startApp();
+    try {
+      const user = await createUser(pool);
+      const res = await bare.call("POST", "/api/devices", {
+        cookie: user.cookie, body: { transport: "apns", token: apnsToken(), key: randomBytes(32).toString("base64url") },
+      });
+      assert.equal(res.status, 503);
+      assert.equal(res.json.error, "apns_unavailable");
+      assert.equal((await bare.call("GET", "/api/config")).json.apns, false);
+      assert.equal((await app.call("GET", "/api/config")).json.apns, true);
+    } finally {
+      await bare.stop();
+    }
   });
 });
 

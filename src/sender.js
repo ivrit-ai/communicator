@@ -3,6 +3,7 @@ import webpush from "web-push";
 import { createPool } from "./db.js";
 import { buildPayload } from "./payload.js";
 import { FCM_MAX_PAYLOAD_BYTES, fcmConfigured, sendFcm, tokenGone } from "./fcm.js";
+import { APNS_MAX_PAYLOAD_BYTES, apnsConfigured, apnsTokenGone, sendApns } from "./apns.js";
 
 const CONCURRENCY = Number(process.env.SENDER_CONCURRENCY ?? 32);
 const LEASE = "60 seconds";
@@ -157,6 +158,7 @@ async function send(row) {
   }
 
   if (row.transport === "fcm") return sendViaFcm(row);
+  if (row.transport === "apns") return sendViaApns(row);
 
   const origin = new URL(row.endpoint).origin;
   if (breakerOpen(origin)) {
@@ -268,6 +270,59 @@ async function sendViaFcm(row) {
       return;
     }
     if (status >= 500 || status === undefined) recordFailure(FCM);
+    await retryLater(row, status, err.body ?? String(err));
+  }
+}
+
+// The ivrit.ai app's iPhones, through Apple. The same outcomes again, plus web
+// push's answer to a message too large: send it again as a stub.
+const APNS = "apns";
+
+async function sendViaApns(row) {
+  if (!apnsConfigured()) {
+    await retryLater(row, null, "apns_not_configured");
+    return;
+  }
+  if (breakerOpen(APNS)) {
+    await retryLater(row, row.last_status, "breaker_open", BREAKER_COOLDOWN_MS);
+    return;
+  }
+  const stub = row.last_status === 413;
+  const payload = buildPayload(row, { stub, maxBytes: APNS_MAX_PAYLOAD_BYTES });
+  try {
+    const status = await sendApns({ endpoint: row.endpoint, secret: row.secret, payload, ttlSeconds: TTL_SECONDS });
+    recordSuccess(APNS);
+    await markSent(row, status);
+  } catch (err) {
+    const status = err.statusCode;
+    if (apnsTokenGone(err)) {
+      recordSuccess(APNS);
+      await deleteDevice(row.device_id);
+      await markFailed(row, status, "token_gone");
+      return;
+    }
+    if (status === 413) {
+      if (stub) await markFailed(row, status, "payload_too_large_even_as_stub");
+      else await retryLater(row, status, "payload_too_large", 0);
+      return;
+    }
+    if (status === 403) {
+      // The key, its id or the team is wrong, or the topic is not this app's:
+      // every send fails.
+      logErr({ msg: "apns_FAIL_auth", status, err: err.body ?? String(err) });
+      await retryLater(row, status, "apns_auth");
+      return;
+    }
+    if (status === 429) {
+      recordFailure(APNS, retryAfterMs(err.headers) ?? BREAKER_COOLDOWN_MS);
+      await retryLater(row, status, "rate_limited", retryAfterMs(err.headers));
+      return;
+    }
+    if (row.attempts >= MAX_ATTEMPTS) {
+      await markFailed(row, status, err.body ?? String(err));
+      return;
+    }
+    if (status >= 500 || status === undefined) recordFailure(APNS);
     await retryLater(row, status, err.body ?? String(err));
   }
 }

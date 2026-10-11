@@ -184,9 +184,10 @@ ALTER TABLE notifications ADD COLUMN IF NOT EXISTS kind text;
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS lang text;
 
 -- Devices reached through a native push service rather than web push: the
--- ivrit.ai app on Android, through Firebase ("fcm"). endpoint holds the
--- service's device token, and secret the device's own AES key, so the push
--- service relays messages it cannot read. Web push keys do not apply to them.
+-- ivrit.ai app, through Firebase on Android ("fcm") and Apple on iPhone
+-- ("apns"). endpoint holds the service's device token (Apple's prefixed with
+-- "sandbox:" for a development build), and secret the device's own AES key, so
+-- the push service relays messages it cannot read. Web push keys do not apply.
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS transport text NOT NULL DEFAULT 'webpush';
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS secret bytea;
 ALTER TABLE devices ALTER COLUMN p256dh DROP NOT NULL;
