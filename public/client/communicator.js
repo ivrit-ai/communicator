@@ -84,10 +84,10 @@ export function createCommunicator({ base = "", client = "web", store, serviceWo
   }
 
   // The ivrit.ai app's native shells register a push token of their own
-  // (Firebase on Android) with the AES key messages are sealed with, instead
-  // of a web push subscription.
-  async function registerNativeDevice({ transport, token, key, oldToken, label }) {
-    const { id } = await post("/api/devices", { transport, token, key, old_token: oldToken, label, client });
+  // (Firebase on Android, Apple's on iPhone, with its environment) with the AES
+  // key messages are sealed with, instead of a web push subscription.
+  async function registerNativeDevice({ transport, token, key, oldToken, environment, label }) {
+    const { id } = await post("/api/devices", { transport, token, key, old_token: oldToken, environment, label, client });
     localStorage.setItem("device_id", id);
     localStorage.setItem("reconciled_at", String(Date.now()));
     return id;
