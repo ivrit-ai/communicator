@@ -14,7 +14,7 @@ import { sealFor } from "./fcm.js";
 // sealed field and replaces the alert before it shows. Apple sees only two
 // fixed placeholders, which the phone itself shows if the extension cannot.
 
-const TOPIC = process.env.APNS_TOPIC || "ai.ivrit.app";
+const TOPIC = process.env.APNS_TOPIC || "ai.ivrit";
 const HOSTS = {
   production: process.env.APNS_HOST || "https://api.push.apple.com",
   sandbox: process.env.APNS_SANDBOX_HOST || "https://api.sandbox.push.apple.com",

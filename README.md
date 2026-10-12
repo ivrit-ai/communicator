@@ -47,7 +47,7 @@ Generate VAPID keys with `npx web-push generate-vapid-keys`. Optional:
 The app's push services, each optional (without one, its devices cannot register):
 `FCM_SERVICE_ACCOUNT` (the Firebase service account's JSON key) for Android; for iPhone,
 `APNS_KEY` (the `.p8` key's contents), `APNS_KEY_ID`, `APNS_TEAM_ID` and `APNS_TOPIC` (the
-app's bundle id, default `ai.ivrit.app`).
+app's bundle id, default `ai.ivrit`).
 
 ## Tests
 

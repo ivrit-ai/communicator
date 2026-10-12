@@ -635,7 +635,7 @@ describe("the app on iPhone, through Apple", () => {
     const message = await sendTo(apns, user, token, "apns send");
     assert.equal(message.path, `/3/device/${token}`);
     assert.equal(message.headers[":method"], "POST");
-    assert.equal(message.headers["apns-topic"], "ai.ivrit.app");
+    assert.equal(message.headers["apns-topic"], "ai.ivrit");
     assert.equal(message.headers["apns-push-type"], "alert");
     assert.equal(message.headers["apns-priority"], "10");
     assert.ok(Number(message.headers["apns-expiration"]) > Date.now() / 1000 + 86400);
