@@ -59,6 +59,10 @@ function readFields(body) {
     if (typeof body.enabled !== "boolean") return { error: bad("enabled", "bad_enabled") };
     out.enabled = body.enabled;
   }
+  if ("addresses_accounts" in body) {
+    if (typeof body.addresses_accounts !== "boolean") return { error: bad("addresses_accounts", "bad_addresses_accounts") };
+    out.addresses_accounts = body.addresses_accounts;
+  }
   if ("link_methods" in body) {
     const methods = readMethods(body.link_methods);
     if (methods.error) return methods;
@@ -68,7 +72,7 @@ function readFields(body) {
 }
 
 const COLUMNS = `s.id, s.name, s.name_he, s.description, s.description_he, s.accent, s.icon_etag,
-  s.link_methods, s.key_prefix, s.rate_per_minute, s.enabled, s.created_at,
+  s.link_methods, s.key_prefix, s.rate_per_minute, s.enabled, s.addresses_accounts, s.created_at,
   (SELECT count(*)::int FROM subscriptions x WHERE x.source_id = s.id AND x.revoked_at IS NULL) AS subscriptions`;
 
 export function adminRoutes(pool) {

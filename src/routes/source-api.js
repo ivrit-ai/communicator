@@ -24,6 +24,19 @@ const LIMITS_SOURCE = {
 
 export const MAX_SUBSCRIPTIONS = 20;
 
+// A message's fields, checked: { fields } or { error } (a 400's body).
+function readMessage(body) {
+  const fields = {};
+  for (const name of ["body", "title", "subtitle", "url", "kind", "lang", "dedupe_key"]) {
+    const result = checkField(name, body?.[name], { limits: LIMITS_SOURCE });
+    if (result.error) return { error: { field: name, ...result } };
+    fields[name] = result.value;
+  }
+  if (!fields.body && !fields.title) return { error: { field: "body", error: "body_or_title_required" } };
+  if (fields.url && !/^https?:\/\//i.test(fields.url)) return { error: { field: "url", error: "url_must_be_http_or_https" } };
+  return { fields };
+}
+
 function subjectHash(sourceId, subject) {
   return createHash("sha256").update(`${sourceId}:${subject}`).digest();
 }
@@ -132,18 +145,8 @@ export function sourceApiRoutes(pool) {
       return res.status(400).json({ field: "subscription_id", error: "subscription_id_required" });
     }
 
-    const fields = {};
-    for (const name of ["body", "title", "subtitle", "url", "kind", "lang", "dedupe_key"]) {
-      const result = checkField(name, req.body?.[name], { limits: LIMITS_SOURCE });
-      if (result.error) return res.status(400).json({ field: name, ...result });
-      fields[name] = result.value;
-    }
-    if (!fields.body && !fields.title) {
-      return res.status(400).json({ field: "body", error: "body_or_title_required" });
-    }
-    if (fields.url && !/^https?:\/\//i.test(fields.url)) {
-      return res.status(400).json({ field: "url", error: "url_must_be_http_or_https" });
-    }
+    const { fields, error } = readMessage(req.body);
+    if (error) return res.status(400).json(error);
 
     try {
       const { rows } = await pool.query(
@@ -193,6 +196,69 @@ export function sourceApiRoutes(pool) {
             WHERE id = $1 AND (last_message_at IS NULL OR last_message_at < now() - interval '1 minute')`,
           [subscriptionId]
         );
+        return { id, devices, duplicate: false };
+      });
+      res.status(202).json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // A source of ivrit.ai's own (sources.addresses_accounts) messaging an account
+  // by its Google email, with no link: the app's server telling its user a
+  // transcript is ready. No such account (never signed in to the app or here)
+  // is a 404, and nothing is kept.
+  router.post("/api/source/v1/accounts/messages", async (req, res, next) => {
+    if (!req.source.addressesAccounts) return res.status(403).json({ error: "source_cannot_address_accounts" });
+    const sourceLimit = { perMinute: req.source.perMinute };
+    const bySource = consume(`source:${req.source.id}`, sourceLimit);
+    if (!bySource.allowed) return rejectRateLimited(res, sourceLimit, bySource.retryAfter);
+
+    const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
+    if (!email || email.length > 320 || !email.includes("@")) {
+      return res.status(400).json({ field: "email", error: "email_required" });
+    }
+    const { fields, error } = readMessage(req.body);
+    if (error) return res.status(400).json(error);
+
+    try {
+      const { rows } = await pool.query(
+        `SELECT sub FROM users WHERE kind = 'google' AND lower(email) = lower($1)
+          ORDER BY last_seen_at DESC LIMIT 1`,
+        [email]
+      );
+      if (!rows.length) return res.status(404).json({ error: "no_such_account" });
+      const userSub = rows[0].sub;
+
+      const byAccount = consume(`account:${req.source.id}:${userSub}`, LIMITS.subscription);
+      if (!byAccount.allowed) return rejectRateLimited(res, LIMITS.subscription, byAccount.retryAfter);
+
+      const at = Date.now();
+      const id = ulid(at);
+      const createdAt = new Date(at);
+      const result = await withTx(pool, async (client) => {
+        if (fields.dedupe_key) {
+          const original = await claimDedupe(client, {
+            userSub,
+            key: `src:${req.source.id}:${fields.dedupe_key}`,
+            id,
+            createdAt,
+          });
+          if (original) return { id: original, devices: 0, duplicate: true };
+        }
+        const devices = await insertAndFanOut(client, {
+          createdAt,
+          id,
+          userSub,
+          source: req.source.name,
+          sourceId: req.source.id,
+          title: fields.title,
+          body: fields.body,
+          url: fields.url,
+          subtitle: fields.subtitle,
+          kind: fields.kind,
+          lang: fields.lang,
+        });
         return { id, devices, duplicate: false };
       });
       res.status(202).json(result);

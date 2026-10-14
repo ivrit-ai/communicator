@@ -207,6 +207,11 @@ CREATE TABLE IF NOT EXISTS handoff_codes (
   challenge  text NOT NULL,
   expires_at timestamptz NOT NULL
 );
+
+-- A source of ivrit.ai's own (the app's server) that may message any account by
+-- its Google email, with no link: the user's account there is the same one.
+-- Set by an admin; such a source is not offered for linking.
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS addresses_accounts boolean NOT NULL DEFAULT false;
 `;
 
 function dayKey(d) {

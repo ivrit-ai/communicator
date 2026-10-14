@@ -51,7 +51,7 @@ export function linkRoutes(pool) {
     try {
       const [sources, subscriptions] = await Promise.all([
         pool.query(
-          `SELECT id, name, name_he, description, description_he, accent, icon_etag, link_methods
+          `SELECT id, name, name_he, description, description_he, accent, icon_etag, link_methods, addresses_accounts
              FROM sources WHERE enabled ORDER BY created_at`
         ),
         pool.query(
@@ -66,6 +66,9 @@ export function linkRoutes(pool) {
         sources: sources.rows.map((row) => ({
           ...publicSource(row),
           methods: row.link_methods.map((m) => ({ label: m.label, label_he: m.label_he })),
+          // Messages the account without a link (the app's own server): listed
+          // for its name and icon, never offered for linking.
+          linkable: !row.addresses_accounts,
         })),
         subscriptions: subscriptions.rows,
       });

@@ -15,7 +15,9 @@ their WhatsApp number once, and Eliezer's transcripts arrive here instead of in 
   `ADMIN_EMAILS`) and authenticates with its own key. A user links a source by taking a
   10-character code from the app to the source (for Eliezer: a prefilled WhatsApp message);
   the source redeems it for a subscription id and sends messages to that id. See
-  `src/routes/source-api.js` for the API.
+  `src/routes/source-api.js` for the API. A source of ivrit.ai's own (the app's server,
+  flagged by an admin) may instead message an account by its Google email, with no link:
+  `POST /api/source/v1/accounts/messages`.
 - **Personal tokens.** "Scripts & API" tokens let your own scripts send you notifications
   with a single `POST /api/notify`.
 - **Delivery.** Web Push (VAPID) to every registered device, from a separate sender process

@@ -31,7 +31,7 @@ async function load(pool, sourceId) {
   const cached = cache.get(sourceId);
   if (cached && cached.expiresAt > Date.now()) return cached;
   const { rows } = await pool.query(
-    "SELECT id, name, key_hash, rate_per_minute, enabled FROM sources WHERE id = $1",
+    "SELECT id, name, key_hash, rate_per_minute, enabled, addresses_accounts FROM sources WHERE id = $1",
     [sourceId]
   );
   const entry = rows[0]
@@ -42,6 +42,7 @@ async function load(pool, sourceId) {
         keyHash: rows[0].key_hash,
         perMinute: rows[0].rate_per_minute,
         enabled: rows[0].enabled,
+        addressesAccounts: rows[0].addresses_accounts,
       }
     : { found: false };
   cache.delete(sourceId);
@@ -67,7 +68,7 @@ export function requireSourceKey(pool) {
         return res.status(401).json({ error: "invalid_key" });
       }
       if (!source.enabled) return res.status(403).json({ error: "source_disabled" });
-      req.source = { id: source.id, name: source.name, perMinute: source.perMinute };
+      req.source = { id: source.id, name: source.name, perMinute: source.perMinute, addressesAccounts: source.addressesAccounts };
       next();
     } catch (err) {
       next(err);

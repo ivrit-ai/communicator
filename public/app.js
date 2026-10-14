@@ -571,12 +571,13 @@ function subscriptionsOf(sourceId) {
 
 function renderSources() {
   const box = $("sources");
-  if (!state.catalog.sources.length) {
+  const linkable = state.catalog.sources.filter((s) => s.linkable !== false);
+  if (!linkable.length) {
     box.replaceChildren(el("p", { class: "muted", text: t("noSources") }));
     return;
   }
   box.replaceChildren(
-    ...state.catalog.sources.map((source) => {
+    ...linkable.map((source) => {
       const subs = subscriptionsOf(source.id);
       const name = localized(source, "name");
       return el("div", { class: "card source-card" }, [
@@ -1058,6 +1059,7 @@ function sourceEditor(source, { isNew = false } = {}) {
   const accent = input(source.accent ?? "#d9481c", { type: "color" });
   const rate = input(source.rate_per_minute ?? 600, { type: "number", min: 1, max: 10000 });
   const enabled = el("input", { type: "checkbox", checked: source.enabled ?? true });
+  const addressesAccounts = el("input", { type: "checkbox", checked: source.addresses_accounts ?? false });
   const methodsBox = el("div", { class: "stack" });
 
   const renderMethods = () =>
@@ -1106,6 +1108,7 @@ function sourceEditor(source, { isNew = false } = {}) {
       accent: accent.value,
       rate_per_minute: Number(rate.value),
       enabled: enabled.checked,
+      addresses_accounts: addressesAccounts.checked,
       link_methods: methods
         .filter((m) => m.label || m.text_template || m.url_template)
         .map((m) => ({ label: m.label.trim(), label_he: m.label_he?.trim() || null, url_template: m.url_template?.trim() || null, text_template: m.text_template.trim() })),
@@ -1134,6 +1137,7 @@ function sourceEditor(source, { isNew = false } = {}) {
     el("div", { class: "grid-2" }, [field(t("fieldId"), id), field(t("fieldName"), name), field(t("fieldNameHe"), nameHe), field(t("fieldAccent"), accent)]),
     el("div", { class: "grid-2" }, [field(t("fieldDescription"), description), field(t("fieldDescriptionHe"), descriptionHe)]),
     el("div", { class: "grid-2" }, [field(t("fieldRate"), rate), el("label", { class: "check" }, [enabled, el("span", { text: t("fieldEnabled") })])]),
+    el("label", { class: "check" }, [addressesAccounts, el("span", { text: t("fieldAddressesAccounts") })]),
     el("h4", { class: "field", text: t("methodsTitle") }),
     el("p", { class: "hint", text: t("methodsHint") }),
     methodsBox,

@@ -523,6 +523,83 @@ describe("the API as a service for other ivrit.ai apps", () => {
   });
 });
 
+describe("ivrit.ai's own source, messaging an account by email", () => {
+  const IVRIT_APP = { id: "ivrit-app-server", name: "ivrit.ai", name_he: "ivrit.ai", link_methods: [] };
+  let key;
+  const send = (body, bearer = key) => app.call("POST", "/api/source/v1/accounts/messages", { bearer, origin: null, body });
+
+  before(async () => {
+    key = await createSource(IVRIT_APP);
+  });
+
+  it("is refused until an admin lets the source address accounts", async () => {
+    await createUser(pool, { email: "first@example.com" });
+    const refused = await send({ email: "first@example.com", title: "Transcript ready" });
+    assert.equal(refused.status, 403, refused.text);
+    assert.equal(refused.json.error, "source_cannot_address_accounts");
+    const allowed = await app.call("PATCH", `/api/admin/sources/${IVRIT_APP.id}`, {
+      cookie: admin.cookie,
+      body: { addresses_accounts: true },
+    });
+    assert.equal(allowed.status, 200, allowed.text);
+    assert.equal(allowed.json.source.addresses_accounts, true);
+  });
+
+  it("reaches the account's devices with no link, and is listed but not linkable", async () => {
+    const user = await createUser(pool, { email: "Dana@Example.com" });
+    const deviceKey = randomBytes(32);
+    const token = `fcm-${randomBytes(24).toString("base64url")}`;
+    await app.call("POST", "/api/devices", {
+      cookie: user.cookie,
+      origin: APP_ORIGIN,
+      body: { transport: "fcm", token, key: deviceKey.toString("base64url") },
+    });
+    const before = fcm.received.length;
+    const sent = await send({
+      email: "dana@example.com",
+      title: "Transcript ready",
+      body: "meeting.m4a",
+      url: `${APP_ORIGIN}/#t/abc`,
+      kind: "transcript-ready",
+      lang: "en",
+    });
+    assert.equal(sent.status, 202, sent.text);
+    assert.equal(sent.json.devices, 1);
+    const message = await waitFor(() => fcm.received.slice(before).find((m) => m.token === token), { what: "fcm send" });
+    const payload = openFcm(message, deviceKey);
+    assert.equal(payload.sid, IVRIT_APP.id);
+    assert.equal(payload.s, "ivrit.ai");
+
+    const catalog = await app.call("GET", "/api/sources", { cookie: user.cookie });
+    const listed = catalog.json.sources.find((s) => s.id === IVRIT_APP.id);
+    assert.equal(listed.linkable, false);
+    assert.equal(catalog.json.sources.find((s) => s.id === "eliezer").linkable, true);
+  });
+
+  it("answers 404 for an address with no account, and keeps nothing", async () => {
+    const res = await send({ email: "nobody@example.com", title: "Transcript ready" });
+    assert.equal(res.status, 404);
+    assert.equal(res.json.error, "no_such_account");
+    assert.equal((await send({ title: "no address" })).json.field, "email");
+  });
+
+  it("deduplicates retries by dedupe_key", async () => {
+    await createUser(pool, { email: "retry@example.com" });
+    const body = { email: "retry@example.com", title: "Transcript ready", dedupe_key: "job-1" };
+    const first = await send(body);
+    const second = await send(body);
+    assert.equal(first.status, 202);
+    assert.equal(second.json.duplicate, true);
+    assert.equal(second.json.id, first.json.id);
+  });
+
+  it("is not open to a linked source", async () => {
+    const linkedKey = await createSource({ ...ELIEZER, id: "linked-only", name: "Linked only" });
+    await createUser(pool, { email: "linked@example.com" });
+    assert.equal((await send({ email: "linked@example.com", title: "hi" }, linkedKey)).status, 403);
+  });
+});
+
 describe("the app on Android, through Firebase", () => {
   const register = (user, body) =>
     app.call("POST", "/api/devices", { cookie: user.cookie, origin: APP_ORIGIN, body: { transport: "fcm", ...body } });
