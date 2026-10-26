@@ -1216,20 +1216,20 @@ const ANNOUNCEMENT = {
   url: "https://play.google.com/store/apps/details?id=ai.ivrit.app",
   he: {
     title: "אפליקציית ivrit.ai לאנדרואיד",
-    body: "אפשר עכשיו להתקין את אפליקציית ivrit.ai המלאה: תמלול קבצים והקלטות עם דוברים, תמלול חי, חיפוש בתמלולים, וההודעות מאליעזר. נכנסים עם אותו חשבון Google, והשירותים שקישרתם כאן כבר מקושרים שם, בלי לקשר מחדש. להתקנה מ-Google Play.",
+    body: "אפשר עכשיו להתקין את אפליקציית ivrit.ai המלאה: תמלול קבצים והקלטות עם דוברים, תמלול חי, חיפוש בתמלולים, וההודעות מאליעזר. נכנסים עם אותו חשבון Google, והשירותים שקישרתם כאן כבר מקושרים שם, בלי לקשר מחדש. להתקנה מ-Google Play: https://play.google.com/store/apps/details?id=ai.ivrit.app",
   },
   en: {
     title: "The ivrit.ai app for Android",
-    body: "You can now install the full ivrit.ai app: transcribe files and recordings with speakers, live transcription, search your transcripts, and your messages from Eliezer. Sign in with the same Google account and the services you linked here are already linked there, no need to link again. Get it on Google Play.",
+    body: "You can now install the full ivrit.ai app: transcribe files and recordings with speakers, live transcription, search your transcripts, and your messages from Eliezer. Sign in with the same Google account and the services you linked here are already linked there, no need to link again. Get it on Google Play: https://play.google.com/store/apps/details?id=ai.ivrit.app",
   },
   anonymous: {
     he: {
       title: "אפליקציית ivrit.ai לאנדרואיד",
-      body: "אפשר עכשיו להתקין את אפליקציית ivrit.ai המלאה: תמלול קבצים והקלטות עם דוברים, תמלול חי, חיפוש בתמלולים, וההודעות מאליעזר. באפליקציה נכנסים עם חשבון Google ומקשרים את אליעזר מחדש. להתקנה מ-Google Play.",
+      body: "אפשר עכשיו להתקין את אפליקציית ivrit.ai המלאה: תמלול קבצים והקלטות עם דוברים, תמלול חי, חיפוש בתמלולים, וההודעות מאליעזר. באפליקציה נכנסים עם חשבון Google ומקשרים את אליעזר מחדש. להתקנה מ-Google Play: https://play.google.com/store/apps/details?id=ai.ivrit.app",
     },
     en: {
       title: "The ivrit.ai app for Android",
-      body: "You can now install the full ivrit.ai app: transcribe files and recordings with speakers, live transcription, search your transcripts, and your messages from Eliezer. In the app, sign in with Google and link Eliezer again. Get it on Google Play.",
+      body: "You can now install the full ivrit.ai app: transcribe files and recordings with speakers, live transcription, search your transcripts, and your messages from Eliezer. In the app, sign in with Google and link Eliezer again. Get it on Google Play: https://play.google.com/store/apps/details?id=ai.ivrit.app",
     },
   },
 };
