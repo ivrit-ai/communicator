@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { Router } from "express";
+import { ulid } from "ulid";
 import { requireAdmin, requireSameOrigin, requireSession } from "../auth-session.js";
 import { SOURCE_ID, evictSource, generateSourceKey } from "../auth-source.js";
+import { withTx } from "../db.js";
+import { checkField, insertAndFanOut } from "./notify.js";
 
 const TEXT_LIMITS = { name: 64, name_he: 64, description: 300, description_he: 300 };
 const MAX_METHODS = 4;
@@ -69,6 +72,91 @@ function readFields(body) {
     out.link_methods = JSON.stringify(methods.value);
   }
   return { value: out };
+}
+
+// --- announcements
+//
+// A message from an admin to every account in an audience, sent as one of the
+// sources (so it shows with that source's name and mark), once per account
+// ever: announcement_sends remembers who has it, by the announcement's key.
+//
+// The one audience so far: people on Android who are not in the ivrit.ai app.
+// On Android is a web push device, or a sign-in to this site, from an Android
+// browser (an Android web view, "; wv)", is an app, not a browser). In the app
+// is having a device the app registered with Firebase or Apple; a web push
+// device marked client 'app' is app.ivrit.ai in a browser, which still counts
+// as not in the app. An app user who never allowed notifications has no such
+// device, and cannot be told apart.
+const ANDROID_WITHOUT_APP = `
+  SELECT u.sub, u.kind, u.locale,
+         EXISTS (SELECT 1 FROM devices d WHERE d.user_sub = u.sub) AS reachable,
+         EXISTS (SELECT 1 FROM announcement_sends a WHERE a.announcement = $1 AND a.user_sub = u.sub) AS sent
+    FROM users u
+   WHERE (EXISTS (SELECT 1 FROM devices d WHERE d.user_sub = u.sub AND d.transport = 'webpush'
+                     AND d.user_agent ~ 'Android' AND d.user_agent !~ '; wv\\)')
+          OR EXISTS (SELECT 1 FROM sessions s WHERE s.user_sub = u.sub
+                        AND s.user_agent ~ 'Android' AND s.user_agent !~ '; wv\\)'))
+     AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.user_sub = u.sub AND d.transport IN ('fcm', 'apns'))`;
+
+const ANNOUNCEMENT_KEY = /^[a-z0-9-]{1,64}$/;
+
+// Which text an account reads: English if it chose English, else Hebrew (also
+// for Yiddish, which reads Hebrew script). Anonymous accounts have no Google
+// account to sign in with, so they get their own text, or nothing.
+function textFor(user, texts) {
+  const lang = user.locale === "en" ? "en" : "he";
+  const set = user.kind === "anonymous" ? texts.anonymous : texts;
+  return set?.[lang] ? { ...set[lang], lang } : null;
+}
+
+function readText(value, where) {
+  const out = {};
+  for (const [name, opts] of [["title", { required: true }], ["body", {}]]) {
+    const result = checkField(name, value?.[name], opts);
+    if (result.error) return { error: { field: `${where}.${name}`, ...result } };
+    out[name] = result.value;
+  }
+  return { value: out };
+}
+
+function readAnnouncement(body) {
+  const key = typeof body?.key === "string" ? body.key.trim() : "";
+  if (!ANNOUNCEMENT_KEY.test(key)) return { error: bad("key", "bad_key") };
+  const url = checkField("url", body.url);
+  if (url.error) return { error: { field: "url", ...url } };
+  if (url.value && !/^https:\/\//i.test(url.value)) return { error: bad("url", "url_must_be_https") };
+  const texts = {};
+  for (const lang of ["he", "en"]) {
+    const text = readText(body[lang], lang);
+    if (text.error) return text;
+    texts[lang] = text.value;
+  }
+  if (body.anonymous) {
+    texts.anonymous = {};
+    for (const lang of ["he", "en"]) {
+      const text = readText(body.anonymous[lang], `anonymous.${lang}`);
+      if (text.error) return text;
+      texts.anonymous[lang] = text.value;
+    }
+  }
+  const sourceId = typeof body.source_id === "string" ? body.source_id : "";
+  return { value: { key, url: url.value, texts, sourceId } };
+}
+
+function countAudience(rows, texts) {
+  const due = rows.filter((r) => !r.sent);
+  const counted = due.filter((r) => !texts || textFor(r, texts));
+  const locale = (r) => (r.locale === "en" ? "en" : r.locale === "he" || r.locale === "yi" || !r.locale ? "he" : "other");
+  return {
+    total: counted.length,
+    notified: counted.filter((r) => r.reachable).length,
+    inbox_only: counted.filter((r) => !r.reachable).length,
+    by_locale: Object.fromEntries(["he", "en", "other"].map((l) => [l, counted.filter((r) => locale(r) === l).length])),
+    anonymous: counted.filter((r) => r.kind === "anonymous").length,
+    // Anonymous accounts left out for want of their own text.
+    skipped: due.length - counted.length,
+    already_sent: rows.length - due.length,
+  };
 }
 
 const COLUMNS = `s.id, s.name, s.name_he, s.description, s.description_he, s.accent, s.icon_etag,
@@ -215,6 +303,72 @@ export function adminRoutes(pool) {
       // The old key must stop working now, not when the cache entry ages out.
       evictSource(req.params.id);
       res.json({ key: wire, key_prefix: keyPrefix });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Who an announcement would reach now, before any text is written.
+  router.get("/api/admin/announcements/audience", async (req, res, next) => {
+    const key = typeof req.query.key === "string" ? req.query.key : "";
+    if (!ANNOUNCEMENT_KEY.test(key)) return res.status(400).json(bad("key", "bad_key"));
+    try {
+      const { rows } = await pool.query(ANDROID_WITHOUT_APP, [key]);
+      res.json({ audience: countAudience(rows, null) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // With dry_run, the audience and the messages as each reader gets them, and
+  // nothing sent. Without, each account due gets its message, once.
+  router.post("/api/admin/announcements", requireSameOrigin, async (req, res, next) => {
+    const parsed = readAnnouncement(req.body ?? {});
+    if (parsed.error) return res.status(400).json(parsed.error);
+    const { key, url, texts, sourceId } = parsed.value;
+    try {
+      const { rows: sources } = await pool.query("SELECT id, name FROM sources WHERE id = $1", [sourceId]);
+      if (!sources.length) return res.status(400).json(bad("source_id", "no_such_source"));
+      const source = sources[0];
+      const { rows } = await pool.query(ANDROID_WITHOUT_APP, [key]);
+      const audience = countAudience(rows, texts);
+      const messages = { he: texts.he, en: texts.en, ...(texts.anonymous ? { anonymous: texts.anonymous } : {}) };
+      if (req.body.dry_run) return res.json({ dry_run: true, source, url, audience, messages });
+
+      let sent = 0;
+      let devices = 0;
+      for (const user of rows) {
+        const text = !user.sent && textFor(user, texts);
+        if (!text) continue;
+        const at = Date.now();
+        const id = ulid(at);
+        const result = await withTx(pool, async (client) => {
+          // Claimed first, in the same transaction: a second press running
+          // alongside waits here, then finds it taken.
+          const claimed = await client.query(
+            "INSERT INTO announcement_sends (announcement, user_sub) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            [key, user.sub]
+          );
+          if (!claimed.rowCount) return null;
+          return insertAndFanOut(client, {
+            createdAt: new Date(at),
+            id,
+            userSub: user.sub,
+            source: source.name,
+            sourceId: source.id,
+            title: text.title,
+            body: text.body,
+            url,
+            kind: "announcement",
+            lang: text.lang,
+          });
+        });
+        if (result === null) continue;
+        sent++;
+        devices += result;
+      }
+      console.log(JSON.stringify({ msg: "announcement_sent", key, source: source.id, sent, devices }));
+      res.json({ sent, devices, audience });
     } catch (err) {
       next(err);
     }

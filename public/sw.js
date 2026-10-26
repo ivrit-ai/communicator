@@ -1,6 +1,6 @@
 importScripts("/client/store.js", "/client/push.js");
 
-const SHELL = "shell-v12";
+const SHELL = "shell-v13";
 const SHELL_FILES = [
   "/",
   "/app.js",

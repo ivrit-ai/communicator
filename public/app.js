@@ -1182,6 +1182,8 @@ function sourceEditor(source, { isNew = false } = {}) {
 
 async function renderAdmin() {
   const { sources } = await api("/api/admin/sources");
+  // Drawn once: saving a source redraws the list, not a draft being written.
+  if (!$("admin-announce").childElementCount) renderAnnouncement(sources);
   const box = $("admin-sources");
   box.replaceChildren(
     ...sources.map((source) => {
@@ -1205,6 +1207,131 @@ async function renderAdmin() {
       return details;
     })
   );
+}
+
+// The announcement to Android users not yet in the ivrit.ai app, as drafted;
+// the admin can change any of it before sending.
+const ANNOUNCEMENT = {
+  key: "android-app-2026-10",
+  url: "https://play.google.com/store/apps/details?id=ai.ivrit.app",
+  he: {
+    title: "אפליקציית ivrit.ai לאנדרואיד",
+    body: "אפשר עכשיו להתקין את אפליקציית ivrit.ai המלאה: תמלול קבצים והקלטות עם דוברים, תמלול חי, חיפוש בתמלולים, וההודעות מאליעזר. נכנסים עם אותו חשבון Google, והשירותים שקישרתם כאן כבר מקושרים שם, בלי לקשר מחדש. להתקנה מ-Google Play.",
+  },
+  en: {
+    title: "The ivrit.ai app for Android",
+    body: "You can now install the full ivrit.ai app: transcribe files and recordings with speakers, live transcription, search your transcripts, and your messages from Eliezer. Sign in with the same Google account and the services you linked here are already linked there, no need to link again. Get it on Google Play.",
+  },
+  anonymous: {
+    he: {
+      title: "אפליקציית ivrit.ai לאנדרואיד",
+      body: "אפשר עכשיו להתקין את אפליקציית ivrit.ai המלאה: תמלול קבצים והקלטות עם דוברים, תמלול חי, חיפוש בתמלולים, וההודעות מאליעזר. באפליקציה נכנסים עם חשבון Google ומקשרים את אליעזר מחדש. להתקנה מ-Google Play.",
+    },
+    en: {
+      title: "The ivrit.ai app for Android",
+      body: "You can now install the full ivrit.ai app: transcribe files and recordings with speakers, live transcription, search your transcripts, and your messages from Eliezer. In the app, sign in with Google and link Eliezer again. Get it on Google Play.",
+    },
+  },
+};
+
+function renderAnnouncement(sources) {
+  const box = $("admin-announce");
+  const source = el("select", {}, sources.map((s) => el("option", { value: s.id, text: s.name })));
+  // ivrit.ai's own source, so the message shows with its mark.
+  source.value = (sources.find((s) => s.addresses_accounts) ?? sources.find((s) => /ivrit\.ai/i.test(s.name)) ?? sources[0])?.id ?? "";
+  const key = input(ANNOUNCEMENT.key, { dir: "ltr", pattern: "[a-z0-9-]+" });
+  const url = input(ANNOUNCEMENT.url, { dir: "ltr" });
+  const textFields = (text, dir) => ({ title: input(text.title, { dir }), body: el("textarea", { dir, rows: 4, text: text.body }) });
+  const fields = {
+    he: textFields(ANNOUNCEMENT.he, "rtl"),
+    en: textFields(ANNOUNCEMENT.en, "ltr"),
+    anonymous: { he: textFields(ANNOUNCEMENT.anonymous.he, "rtl"), en: textFields(ANNOUNCEMENT.anonymous.en, "ltr") },
+  };
+  const counts = el("p", { class: "hint" });
+  const previews = el("div", { class: "stack" });
+  const send = el("button", { class: "btn primary", type: "button", text: t("announceSend"), disabled: true });
+
+  const read = ({ title, body }) => ({ title: title.value.trim(), body: body.value.trim() || null });
+  const collect = (dryRun) => ({
+    key: key.value.trim(),
+    source_id: source.value,
+    url: url.value.trim() || null,
+    he: read(fields.he),
+    en: read(fields.en),
+    anonymous: { he: read(fields.anonymous.he), en: read(fields.anonymous.en) },
+    dry_run: dryRun,
+  });
+  const iconUrl = (id) => {
+    const s = sources.find((x) => x.id === id);
+    return s?.icon_etag ? `/api/sources/${s.id}/icon.png?v=${s.icon_etag}` : null;
+  };
+  const card = (label, text, sourceInfo) =>
+    el("div", { class: "stack" }, [
+      el("span", { class: "hint", text: label }),
+      el("div", { class: "notif-preview" }, [
+        avatar({ icon: iconUrl(sourceInfo.id), name: sourceInfo.name }),
+        el("div", { dir: "auto" }, [el("b", { text: text.title }), el("span", { text: text.body ?? "" })]),
+      ]),
+    ]);
+
+  let due = 0;
+  const preview = async () => {
+    try {
+      const res = await post("/api/admin/announcements", collect(true));
+      due = res.audience.total;
+      counts.textContent = t("announceAudience", res.audience);
+      previews.replaceChildren(
+        card(t("announceForHe"), res.messages.he, res.source),
+        card(t("announceForEn"), res.messages.en, res.source),
+        card(t("announceForAnonymous"), res.messages.anonymous.he, res.source),
+        el("p", { class: "hint", dir: "ltr", text: res.url ?? "" })
+      );
+      send.disabled = !due;
+    } catch (err) {
+      send.disabled = true;
+      toast(t("error", `${err.detail?.field ?? ""} ${err.message}`.trim()));
+    }
+  };
+  send.addEventListener("click", async () => {
+    if (!(await ask(t("announceConfirm", due), { ok: t("announceSend") }))) return;
+    send.disabled = true;
+    try {
+      const res = await post("/api/admin/announcements", collect(false));
+      toast(t("announceSent", res.sent));
+    } catch (err) {
+      toast(t("error", err.message));
+    }
+    await preview();
+  });
+
+  const textGroup = (label, f) =>
+    el("div", { class: "stack" }, [el("h4", { class: "field", text: label }), field(t("announceTitle"), f.title), field(t("announceBody"), f.body)]);
+  const details = el("details", { class: "card" }, [
+      el("summary", { style: "cursor:pointer;list-style:none" }, [
+        el("h3", { text: t("announceHeading") }),
+        el("p", { class: "hint", text: t("announceLede") }),
+      ]),
+      el("div", { class: "stack", style: "margin-top:16px" }, [
+        el("div", { class: "grid-2" }, [field(t("announceKey"), key), field(t("announceFrom"), source)]),
+        field(t("announceUrl"), url),
+        el("div", { class: "grid-2" }, [textGroup(t("announceForHe"), fields.he), textGroup(t("announceForEn"), fields.en)]),
+        el("div", { class: "grid-2" }, [
+          textGroup(`${t("announceForAnonymous")} · עברית`, fields.anonymous.he),
+          textGroup(`${t("announceForAnonymous")} · English`, fields.anonymous.en),
+        ]),
+        counts,
+        previews,
+        el("div", { class: "row end" }, [
+          el("button", { class: "btn", type: "button", text: t("announcePreview"), onclick: preview }),
+          send,
+        ]),
+      ]),
+    ]);
+  // Any change needs a fresh preview before it can be sent.
+  details.addEventListener("input", () => (send.disabled = true));
+  details.addEventListener("change", () => (send.disabled = true));
+  box.replaceChildren(details);
+  preview();
 }
 
 $("new-source").addEventListener("click", () => {

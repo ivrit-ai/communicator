@@ -18,6 +18,10 @@ their WhatsApp number once, and Eliezer's transcripts arrive here instead of in 
   `src/routes/source-api.js` for the API. A source of ivrit.ai's own (the app's server,
   flagged by an admin) may instead message an account by its Google email, with no link:
   `POST /api/source/v1/accounts/messages`.
+- **Announcements.** The Admin tab also sends one message, as a chosen source, to everyone
+  on Android who is not in the ivrit.ai app yet (an Android browser device or sign-in, and
+  no device the app registered); a key makes each account get it once, ever
+  (`/api/admin/announcements`).
 - **Personal tokens.** "Scripts & API" tokens let your own scripts send you notifications
   with a single `POST /api/notify`.
 - **Delivery.** Web Push (VAPID) to every registered device, from a separate sender process

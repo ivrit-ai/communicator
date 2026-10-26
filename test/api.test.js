@@ -1058,6 +1058,112 @@ describe("link code stats", () => {
   });
 });
 
+describe("announcements, to Android users not in the app", () => {
+  const ANDROID = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36";
+  const WEBVIEW = "Mozilla/5.0 (Linux; Android 14; Pixel 8; wv) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36";
+  const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15";
+  const KEY = "android-app-test";
+  const text = (title) => ({ title, body: `${title} body` });
+  const announcement = (extra = {}) => ({
+    key: KEY,
+    source_id: "announcer",
+    url: "https://play.google.com/store/apps/details?id=ai.ivrit.app",
+    he: text("he"),
+    en: text("en"),
+    anonymous: { he: text("anon he"), en: text("anon en") },
+    ...extra,
+  });
+  const announce = (body, cookie = admin.cookie) => app.call("POST", "/api/admin/announcements", { cookie, body });
+  const received = async (sub) =>
+    (await pool.query("SELECT title, source_id, kind, lang, url FROM notifications WHERE user_sub = $1 AND kind = 'announcement'", [sub])).rows;
+  const users = {};
+
+  before(async () => {
+    await createSource({ ...ELIEZER, id: "announcer", name: "ivrit.ai" });
+    users.web = await createUser(pool);
+    await createDevice(pool, users.web.sub, push, { userAgent: ANDROID });
+    // Signed in from an Android browser once, notifications never allowed.
+    users.signedIn = await createUser(pool, { locale: "en" });
+    await pool.query("UPDATE sessions SET user_agent = $2 WHERE user_sub = $1", [users.signedIn.sub, ANDROID]);
+    users.anonymous = await createUser(pool, { kind: "anonymous", locale: "he" });
+    await createDevice(pool, users.anonymous.sub, push, { userAgent: ANDROID });
+    // Already in the app: its Firebase device, beside the browser it came from.
+    users.app = await createUser(pool);
+    await createDevice(pool, users.app.sub, push, { userAgent: ANDROID });
+    await app.call("POST", "/api/devices", {
+      cookie: users.app.cookie,
+      origin: APP_ORIGIN,
+      body: { transport: "fcm", token: `fcm-${randomBytes(24).toString("base64url")}`, key: randomBytes(32).toString("base64url") },
+    });
+    users.desktop = await createUser(pool);
+    await createDevice(pool, users.desktop.sub, push, { userAgent: MAC });
+    users.webview = await createUser(pool);
+    await pool.query("UPDATE sessions SET user_agent = $2 WHERE user_sub = $1", [users.webview.sub, WEBVIEW]);
+  });
+
+  it("is for admins only", async () => {
+    const user = await createUser(pool);
+    assert.equal((await app.call("GET", `/api/admin/announcements/audience?key=${KEY}`, { cookie: user.cookie })).status, 403);
+    assert.equal((await announce(announcement(), user.cookie)).status, 403);
+    assert.equal((await received(user.sub)).length, 0);
+  });
+
+  it("a dry run counts the audience and sends nothing", async () => {
+    const audience = await app.call("GET", `/api/admin/announcements/audience?key=${KEY}`, { cookie: admin.cookie });
+    assert.equal(audience.status, 200, audience.text);
+    const dry = await announce(announcement({ dry_run: true }));
+    assert.equal(dry.status, 200, dry.text);
+    assert.equal(dry.json.dry_run, true);
+    assert.equal(dry.json.source.name, "ivrit.ai");
+    assert.equal(dry.json.messages.he.title, "he");
+    assert.equal(dry.json.audience.total, audience.json.audience.total);
+    assert.ok(dry.json.audience.total >= 3);
+    assert.ok(dry.json.audience.inbox_only >= 1);
+    assert.ok(dry.json.audience.anonymous >= 1);
+    for (const user of Object.values(users)) assert.equal((await received(user.sub)).length, 0);
+  });
+
+  it("reaches Android users not in the app, each in their language, and no one else", async () => {
+    const sent = await announce(announcement());
+    assert.equal(sent.status, 200, sent.text);
+    const [web] = await received(users.web.sub);
+    assert.deepEqual(web, {
+      title: "he", source_id: "announcer", kind: "announcement", lang: "he",
+      url: "https://play.google.com/store/apps/details?id=ai.ivrit.app",
+    });
+    assert.equal((await received(users.signedIn.sub))[0].title, "en");
+    assert.equal((await received(users.anonymous.sub))[0].title, "anon he");
+    for (const who of ["app", "desktop", "webview"]) assert.equal((await received(users[who].sub)).length, 0, who);
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM deliveries d JOIN devices v ON v.id = d.device_id WHERE v.user_sub = $1`,
+      [users.web.sub]
+    );
+    assert.equal(rows[0].n, 1);
+  });
+
+  it("sends once: pressed again, it reaches no one twice", async () => {
+    const again = await announce(announcement());
+    assert.equal(again.status, 200);
+    assert.equal(again.json.sent, 0);
+    assert.equal(again.json.audience.total, 0);
+    assert.ok(again.json.audience.already_sent >= 3);
+    assert.equal((await received(users.web.sub)).length, 1);
+  });
+
+  it("leaves accounts without Google out when they have no text of their own", async () => {
+    const dry = await announce(announcement({ key: "no-anonymous-text", anonymous: undefined, dry_run: true }));
+    assert.equal(dry.json.audience.anonymous, 0);
+    assert.ok(dry.json.audience.skipped >= 1);
+  });
+
+  it("refuses what it cannot send", async () => {
+    assert.equal((await announce(announcement({ key: "Bad Key" }))).json.field, "key");
+    assert.equal((await announce(announcement({ url: "http://example.com" }))).json.field, "url");
+    assert.equal((await announce(announcement({ he: { body: "no title" } }))).json.field, "he.title");
+    assert.equal((await announce(announcement({ source_id: "nowhere" }))).json.field, "source_id");
+  });
+});
+
 describe("retention", () => {
   it("drops partitions older than three days and keeps the rest", async () => {
     const client = await pool.connect();

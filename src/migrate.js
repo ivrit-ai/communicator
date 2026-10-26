@@ -212,6 +212,16 @@ CREATE TABLE IF NOT EXISTS handoff_codes (
 -- its Google email, with no link: the user's account there is the same one.
 -- Set by an admin; such a source is not offered for linking.
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS addresses_accounts boolean NOT NULL DEFAULT false;
+
+-- Who an admin's announcement has reached, by its key, so sending it again
+-- (a second press, a retry weeks later) reaches only those it has not. Kept,
+-- unlike dedupe's day: an announcement is sent once, ever.
+CREATE TABLE IF NOT EXISTS announcement_sends (
+  announcement text NOT NULL,
+  user_sub     text NOT NULL REFERENCES users(sub) ON DELETE CASCADE,
+  sent_at      timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (announcement, user_sub)
+);
 `;
 
 function dayKey(d) {
