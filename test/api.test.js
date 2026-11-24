@@ -972,6 +972,30 @@ describe("the app signed in with Google itself", () => {
     const { rowCount } = await pool.query("SELECT 1 FROM users WHERE sub = $1", [me.json.sub]);
     assert.equal(rowCount, 0);
   });
+
+  it("does not bring a deleted account back for a session from before, renewed or not", async () => {
+    const account = { iss: APP_ORIGIN, aud: "ivrit-app", sub: "google-gone", email: "gone@example.com" };
+    const signedIn = Math.floor(Date.now() / 1000) - 3600;
+    const session = (claims) => ({ authorization: `Bearer ${googleStandIn.token({ ...account, claims })}` });
+    const phone = session({ auth_time: signedIn });
+    assert.equal((await as("GET", "/api/me", phone)).status, 200);
+    assert.equal((await as("DELETE", "/api/me", phone)).status, 200);
+
+    // The same session on another device; renewed since (a new iat, the same
+    // auth_time); and one from before auth_time was kept.
+    const laptop = session({ auth_time: signedIn, iat: signedIn + 60 });
+    for (const [what, headers] of [["the same", phone], ["another device's", laptop], ["a renewed", session({ auth_time: signedIn })], ["an older", session({})]]) {
+      assert.equal((await as("GET", "/api/me", headers)).status, 401, what);
+    }
+    const { rowCount } = await pool.query("SELECT 1 FROM users WHERE google_sub = 'google-gone' OR sub = 'google-gone'");
+    assert.equal(rowCount, 0);
+
+    // Signing in with Google again makes a new account.
+    await new Promise((r) => setTimeout(r, 1100));
+    const again = await as("GET", "/api/me", session({ auth_time: Math.floor(Date.now() / 1000) }));
+    assert.equal(again.status, 200);
+    assert.equal(again.json.email, "gone@example.com");
+  });
 });
 
 describe("test notification", () => {

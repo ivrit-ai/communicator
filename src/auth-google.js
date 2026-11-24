@@ -64,6 +64,8 @@ export async function verifyGoogleToken(token) {
       email: String(payload.email),
       name: payload.name ? String(payload.name) : null,
       exp: payload.exp,
+      // An hour's token: issued is as good as signed in.
+      signedInAt: Number(payload.auth_time ?? payload.iat),
     };
   } catch (err) {
     console.warn(JSON.stringify({ msg: "google_token_rejected", err: String(err.code ?? err) }));
@@ -88,6 +90,10 @@ async function verifyAppSession(token) {
       email: String(payload.email),
       name: payload.name ? String(payload.name) : null,
       exp: payload.exp,
+      // When the account signed in with Google, kept through renewals (iat is
+      // the last renewal's). Unknown in sessions from before the claim: as if
+      // long ago, which matters only for an account since deleted.
+      signedInAt: Number(payload.auth_time ?? 0),
     };
   } catch (err) {
     console.warn(JSON.stringify({ msg: "app_session_rejected", err: String(err.code ?? err) }));

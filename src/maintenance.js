@@ -16,6 +16,10 @@ const LOCK_ID = 9138;
 // 410 and unbinds, rather than a 410 that could equally mean "never existed".
 const REVOKED_KEEP_DAYS = 30;
 
+// The ivrit.ai app's sessions last 90 days from their last renewal, and the
+// app renews none it has seen refused; a little more covers clock skew.
+const DELETED_KEEP_DAYS = 100;
+
 export async function sweep(pool) {
   const client = await pool.connect();
   try {
@@ -57,6 +61,10 @@ export async function sweep(pool) {
         "DELETE FROM subscriptions WHERE revoked_at < now() - make_interval(days => $1)",
         [REVOKED_KEEP_DAYS]
       );
+      const deleted = await client.query(
+        "DELETE FROM deleted_accounts WHERE deleted_at < now() - make_interval(days => $1)",
+        [DELETED_KEEP_DAYS]
+      );
       // An anonymous account is its session: once the last one has expired or
       // been signed out, nobody can ever reach it again.
       const anonymous = await client.query(
@@ -70,6 +78,7 @@ export async function sweep(pool) {
         link_codes_pruned: links.rowCount,
         subscriptions_pruned: revoked.rowCount,
         anonymous_reaped: anonymous.rowCount,
+        deleted_accounts_pruned: deleted.rowCount,
         partitions_dropped: dropped.length,
         dedupe_pruned: dedupe.rowCount,
         sessions_pruned: sessions.rowCount,

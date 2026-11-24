@@ -296,10 +296,10 @@ export async function startGoogleService() {
   const part = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
   return {
     jwksUrl: `http://127.0.0.1:${server.address().port}/certs`,
-    token({ sub, email, aud, iss = "https://accounts.google.com", ttl = 3600, verified = true, name = null, key = privateKey }) {
+    token({ sub, email, aud, iss = "https://accounts.google.com", ttl = 3600, verified = true, name = null, key = privateKey, claims = {} }) {
       const now = Math.floor(Date.now() / 1000);
       const unsigned = `${part({ alg: "RS256", typ: "JWT", kid: "test-kid" })}.${part({
-        iss, aud, sub, email, email_verified: verified, name, iat: now, exp: now + ttl,
+        iss, aud, sub, email, email_verified: verified, name, iat: now, exp: now + ttl, ...claims,
       })}`;
       return `${unsigned}.${createSign("RSA-SHA256").update(unsigned).sign(key, "base64url")}`;
     },

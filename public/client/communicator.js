@@ -110,7 +110,7 @@ export function createCommunicator({ base = "", client = "web", store, serviceWo
     localStorage.removeItem("device_id");
     localStorage.removeItem("reconciled_at");
     const reg = await navigator.serviceWorker?.getRegistration();
-    await (await reg?.pushManager.getSubscription())?.unsubscribe().catch(() => {});
+    await (await reg?.pushManager?.getSubscription())?.unsubscribe().catch(() => {});
   }
 
   // Pull everything newer than the last message this device synced. The

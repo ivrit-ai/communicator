@@ -3,6 +3,7 @@ import { readCookie } from "./cookies.js";
 import { trustedHost } from "./auth-platform.js";
 import { allowedAppOrigin } from "./cors.js";
 import { bearerJwt, verifyGoogleToken } from "./auth-google.js";
+import { googleSubHash } from "./accounts.js";
 
 const SESSION_COOKIE = "__Host-notifier_sess";
 const TTL_DAYS = 90;
@@ -113,11 +114,22 @@ async function googleUser(pool, identity) {
   return rows[0];
 }
 
+// A session signed in before its account was deleted (on another device, say)
+// must not bring the account back.
+async function deletedSince(pool, identity) {
+  const { rowCount } = await pool.query(
+    "SELECT 1 FROM deleted_accounts WHERE google_sub_hash = $1 AND deleted_at > to_timestamp($2)",
+    [googleSubHash(identity.sub), identity.signedInAt]
+  );
+  return rowCount > 0;
+}
+
 async function bearerUser(pool, token) {
   const hit = tokenUsers.get(token);
   if (hit && hit.exp * 1000 > Date.now()) return hit.user;
   const identity = await verifyGoogleToken(token);
   if (!identity) return null;
+  if (await deletedSince(pool, identity)) return null;
   const user = await googleUser(pool, identity);
   if (tokenUsers.size >= MAX_CACHED) tokenUsers.delete(tokenUsers.keys().next().value);
   tokenUsers.set(token, { user, exp: identity.exp });

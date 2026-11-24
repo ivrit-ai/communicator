@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ulid } from "ulid";
 
 // Everything a user owns, by table. Notifications have no foreign key (they
@@ -53,6 +54,23 @@ export async function deleteAccount(client, sub) {
   );
   await client.query("DELETE FROM notifications WHERE user_sub = $1", [sub]);
   await client.query("DELETE FROM dedupe WHERE user_sub = $1", [sub]);
+  // The app's sessions outlive the account (they are the app's, signed and
+  // lasting months): whatever Google ids they could name it by are remembered,
+  // so they are refused rather than making it again (auth-session.js).
+  const { rows } = await client.query("SELECT sub, google_sub, kind FROM users WHERE sub = $1", [sub]);
+  const ids = rows[0]?.kind === "google" ? [rows[0].sub, rows[0].google_sub].filter(Boolean) : [];
+  for (const id of new Set(ids)) {
+    await client.query(
+      `INSERT INTO deleted_accounts (google_sub_hash) VALUES ($1)
+       ON CONFLICT (google_sub_hash) DO UPDATE SET deleted_at = now()`,
+      [googleSubHash(id)]
+    );
+  }
   // Cascades to sessions, devices, tokens, subscriptions and link codes.
   await client.query("DELETE FROM users WHERE sub = $1", [sub]);
+}
+
+// Only to recognise an id seen again; nothing needs it back.
+export function googleSubHash(googleSub) {
+  return createHash("sha256").update(`google-sub:${googleSub}`).digest();
 }

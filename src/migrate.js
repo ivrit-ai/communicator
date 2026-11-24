@@ -222,6 +222,15 @@ CREATE TABLE IF NOT EXISTS announcement_sends (
   sent_at      timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (announcement, user_sub)
 );
+
+-- Deleted accounts, by a hash of their Google account id, for as long as a
+-- session from before could still be shown (DELETED_KEEP_DAYS): such a session
+-- is refused rather than making the account again, while signing in with Google
+-- afresh makes a new one.
+CREATE TABLE IF NOT EXISTS deleted_accounts (
+  google_sub_hash bytea PRIMARY KEY,
+  deleted_at      timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 function dayKey(d) {
